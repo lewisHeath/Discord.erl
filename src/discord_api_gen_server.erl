@@ -13,13 +13,16 @@
 -export([code_change/3]).
 
 -record(state, {
-    bot_token,
     gateway_ws = "gateway.discord.gg",
     conn_pid,
     stream_ref,
     heartbeat_interval,
     handshake_status = not_connected
 }).
+
+%% Macros
+
+-define(BOT_TOKEN, config:get_value(bot_token)).
 
 %% API.
 
@@ -31,9 +34,9 @@ start_link() ->
 
 init([]) ->
     {ok, BotToken} = application:get_env(bot_token),
-    lager:debug("Using bot token: ~p~n", [BotToken]),
+    io:format("Using bot token: ~p~n", [BotToken]),
     self() ! setup_connection,
-    {ok, #state{bot_token = BotToken}}.
+    {ok, #state{}}.
 
 handle_call(_Request, _From, State) ->
     {reply, ignored, State}.
@@ -55,27 +58,18 @@ handle_info(setup_connection, State) ->
     {noreply, State};
 handle_info({gun_upgrade, ConnPid, StreamRef, [<<"websocket">>], _Headers}, State) ->
     % TODO: log
-    lager:debug("Got a gun_upgrade, setting state to connected~n"),
+    io:format("Got a gun_upgrade, setting state to connected~n"),
     {noreply, State#state{conn_pid = ConnPid, stream_ref = StreamRef}};
-handle_info({gun_ws, _ConnPid, _StreamRef, {text, Data}}, State = #state{handshake_status = not_connected}) ->
-    % Complete handshake with Discord
-    % Decode the frame, which should be the initial handshake message
-    DecodedData = jsx:decode(Data),
-    lager:debug("Initial Handshake Data: ~p~n", [DecodedData]),
-    % Make sure the OP is 10 and save the heartbeat interval
-    10 = maps:get(<<"op">>, DecodedData),
-    HeartbeatInterval = maps:get(<<"heartbeat_interval">>, maps:get(<<"d">>, DecodedData)),
-    lager:debug("Starting heartbeat with an interval of ~pms~n", [HeartbeatInterval]),
-    % Initiate the heartbeat
-    erlang:send_after(HeartbeatInterval, self(), heartbeat),
-    {noreply, State#state{heartbeat_interval = HeartbeatInterval, handshake_status = connected}};
+handle_info({gun_ws, ConnPid, StreamRef, {text, Data}}, State = #state{handshake_status = not_connected}) ->
+    NewState = establish_discord_connection(ConnPid, StreamRef, Data, State),
+    {noreply, NewState};
 handle_info({gun_ws, ConnPid, StreamRef, Frame}, State) ->
     % In the future, spawn a process to handle the payload from the websocket
     NewState = discord_api_gateway_handler:handle_ws(ConnPid, StreamRef, Frame, State),
     {noreply, NewState};
 handle_info(heartbeat, State=#state{conn_pid = ConnPid, stream_ref = StreamRef, heartbeat_interval = HeartbeatInterval}) ->
     % Send a heartbeat message back to discord
-    lager:debug("HEARTBEAT~n", []),
+    io:format("HEARTBEAT~n", []),
     gun:ws_send(ConnPid, StreamRef, {text, jsx:encode(#{
         <<"op">> => 1,
         <<"d">> => null
@@ -84,7 +78,7 @@ handle_info(heartbeat, State=#state{conn_pid = ConnPid, stream_ref = StreamRef, 
     erlang:send_after(HeartbeatInterval, self(), heartbeat),
     {noreply, State};
 handle_info(Info, State) ->
-    lager:debug("Handle info: ~p~nWith State ~p~n", [Info, State]),
+    io:format("Handle info: ~p~nWith State ~p~n", [Info, State]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->
@@ -92,3 +86,42 @@ terminate(_Reason, _State) ->
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
+
+establish_discord_connection(ConnPid, StreamRef, Data, State) ->
+    % Complete handshake with Discord
+    % Decode the frame, which should be the initial handshake message
+    DecodedData = jsx:decode(Data),
+    io:format("Initial Handshake Data: ~p~n", [DecodedData]),
+    % Make sure the OP is 10 and save the heartbeat interval
+    10 = maps:get(<<"op">>, DecodedData),
+    HeartbeatInterval = maps:get(<<"heartbeat_interval">>, maps:get(<<"d">>, DecodedData)),
+    io:format("Starting heartbeat with an interval of ~pms~n", [HeartbeatInterval]),
+    % Initiate the heartbeat
+    erlang:send_after(HeartbeatInterval, self(), heartbeat),
+    % Send the identify with intents message
+    gun:ws_send(ConnPid, StreamRef, {text, jsx:encode(generate_intents_message())}),
+    io:format("USING IDENTIFY MSG: ~p~n", [generate_intents_message()]),
+    % Wait for the READY message and the GUILD_CREATE message
+    receive
+        {gun_ws, ConnPid, StreamRef, {text, Ready}} ->
+            ReadyMsg = jsx:decode(Ready),
+            %% TODO: handle the ready message and get the details I need for my state
+            io:format("MSG: ~p~n", [ReadyMsg])
+    end,
+    State#state{heartbeat_interval = HeartbeatInterval, handshake_status = connected}.
+
+generate_intents_message() ->
+    #{
+        <<"op">> => 2,
+        <<"d">> => #{
+            <<"token">> => list_to_binary(?BOT_TOKEN),
+            <<"properties">> => #{
+                <<"os">> => <<"linux">>,
+                <<"browser">> => <<"discord_api_erlang_libary">>,
+                <<"device">> => <<"discord_api_erlang_libary">>
+            },
+            <<"intents">> => generate_intents()
+        }
+    }.
+
+generate_intents() -> 33281.
