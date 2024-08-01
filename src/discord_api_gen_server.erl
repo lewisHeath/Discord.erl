@@ -13,22 +13,25 @@
 -export([code_change/3]).
 
 -record(state, {
-    gateway_ws = "gateway.discord.gg",
     conn_pid,
     stream_ref,
     heartbeat_interval,
-    handshake_status = not_connected
+    handshake_status = not_connected,
+    resume_connection_url
 }).
 
 %% Macros
 
+-define(GATEWAY_URL, "gateway.discord.gg").
 -define(BOT_TOKEN, config:get_value(bot_token)).
+-define(HEARTBEAT_ACK, <<"{\"t\":null,\"s\":null,\"op\":11,\"d\":null}">>).
 
 %% API.
 
 -spec start_link() -> {ok, pid()}.
 start_link() ->
-    gen_server:start_link(?MODULE, [], []).
+    io:format("Starting the discord api!~n", []),
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 %% gen_server.
 
@@ -41,16 +44,20 @@ init([]) ->
 handle_call(_Request, _From, State) ->
     {reply, ignored, State}.
 
+handle_cast({send, Payload}, State=#state{conn_pid = ConnPid, stream_ref = StreamRef}) ->
+    io:format("Sending payload ~p to the discord api~n", [Payload]),
+    gun:ws_send(ConnPid, StreamRef, {text, Payload}),
+    {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info(setup_connection, State) ->
     % Open the connection to the gateway
-    {ok, ConnPid} = gun:open("gateway.discord.gg", 443,
-                          #{protocols => [http],
-                            transport => tls,
-                            tls_opts => [{verify, verify_none}, {cacerts, certifi:cacerts()}],
-                            http_opts => #{version => 'HTTP/1.1'}}),
+    {ok, ConnPid} = gun:open(?GATEWAY_URL, 443,
+                            #{protocols => [http],
+                              transport => tls,
+                              tls_opts => [{verify, verify_none}, {cacerts, certifi:cacerts()}],
+                              http_opts => #{version => 'HTTP/1.1'}}),
     % Await the successfull connection
     {ok, http} = gun:await_up(ConnPid),
     % Upgrade to a websocket
@@ -60,21 +67,27 @@ handle_info({gun_upgrade, ConnPid, StreamRef, [<<"websocket">>], _Headers}, Stat
     % TODO: log
     io:format("Got a gun_upgrade, setting state to connected~n"),
     {noreply, State#state{conn_pid = ConnPid, stream_ref = StreamRef}};
+% This handles the initial message from discord when we have not completed the handshake yet
 handle_info({gun_ws, ConnPid, StreamRef, {text, Data}}, State = #state{handshake_status = not_connected}) ->
     NewState = establish_discord_connection(ConnPid, StreamRef, Data, State),
     {noreply, NewState};
+% This is the main handler for when a gateway payload is sent to the application
 handle_info({gun_ws, ConnPid, StreamRef, Frame}, State) ->
     % In the future, spawn a process to handle the payload from the websocket
+    % Also in the future, this will be a module defined by the user of the Library
     NewState = discord_api_gateway_handler:handle_ws(ConnPid, StreamRef, Frame, State),
     {noreply, NewState};
 handle_info(heartbeat, State=#state{conn_pid = ConnPid, stream_ref = StreamRef, heartbeat_interval = HeartbeatInterval}) ->
     % Send a heartbeat message back to discord
-    io:format("HEARTBEAT~n", []),
-    gun:ws_send(ConnPid, StreamRef, {text, jsx:encode(#{
-        <<"op">> => 1,
-        <<"d">> => null
-    })}),
-    % MAYBE wait here for the ACK?
+    io:format("Sending heartbeat -> ", []),
+    gun:ws_send(ConnPid, StreamRef, {text, jsx:encode(#{ <<"op">> => 1, <<"d">> => null })}),
+    % wait here for the ACK?
+    % In the future this will be a separate process monitored by the sup
+    receive
+        {gun_ws, ConnPid, StreamRef, {text, ?HEARTBEAT_ACK}} -> io:format("ACK~n")
+    after 5000 ->
+        error(heartbeat_ack_timeout)
+    end,
     erlang:send_after(HeartbeatInterval, self(), heartbeat),
     {noreply, State};
 handle_info(Info, State) ->
@@ -108,6 +121,7 @@ establish_discord_connection(ConnPid, StreamRef, Data, State) ->
             %% TODO: handle the ready message and get the details I need for my state
             io:format("MSG: ~p~n", [ReadyMsg])
     end,
+    status_handler:update_status([#{<<"name">> => <<"hello world">>, <<"type">> => 0}], <<"dnd">>),
     State#state{heartbeat_interval = HeartbeatInterval, handshake_status = connected}.
 
 generate_intents_message() ->
