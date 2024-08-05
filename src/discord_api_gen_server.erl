@@ -112,9 +112,8 @@ handle_info({gun_down, ConnPid, Protocol, Reason, KilledStreams}, State) ->
     lager:debug("Got a gun_down message with protocol: ~p, reason: ~p, killed streams: ~p", [Protocol, Reason, KilledStreams]),
     % Flush the messages from the connection Pid
     gun:flush(ConnPid),
-    % Send a setup_connection message to ourselves
-    self() ! setup_connection,
-    {noreply, State#state{handshake_status = not_connected}};
+    % Restart the gen_server
+    {stop, disconnected, State};
 handle_info(Info, State) ->
     lager:debug("Handle info: ~p", [Info]),
     lager:debug("With State: ~p", [State]),
@@ -136,7 +135,7 @@ establish_discord_connection(ConnPid, StreamRef, Data, State) ->
     HeartbeatInterval = maps:get(<<"heartbeat_interval">>, maps:get(<<"d">>, DecodedData)),
     lager:debug("Starting heartbeat with an interval of ~pms", [HeartbeatInterval]),
     % Initiate the heartbeat
-    erlang:send_after(HeartbeatInterval, self(), heartbeat),
+    % erlang:send_after(HeartbeatInterval, self(), heartbeat),
     % Send the identify with intents message
     gun:ws_send(ConnPid, StreamRef, {text, jsx:encode(generate_intents_message())}),
     lager:debug("USING IDENTIFY MSG: ~p", [generate_intents_message()]),

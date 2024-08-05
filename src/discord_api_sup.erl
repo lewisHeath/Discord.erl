@@ -12,7 +12,7 @@ init([]) ->
 		#{
 			id => discord_api_gen_server,
 			start => {discord_api_gen_server, start_link, []},
-			restart => permanent,
+			restart => transient,
 			type => worker,
 			modules => [discord_api_gen_server]
 		}
