@@ -84,16 +84,18 @@ handle_info({gun_ws, ConnPid, StreamRef, {close, CloseCode, Reason}}, State) ->
 handle_info({gun_ws, ConnPid, StreamRef, Frame}, State = #state{sequence_number = SequenceNumber}) ->
     % In the future, spawn a process to handle the payload from the websocket
     % Also in the future, this will be a module defined by the user of the Library
-    NewState = discord_api_gateway_handler:handle_ws(ConnPid, StreamRef, Frame, State),
-    {noreply, NewState#state{sequence_number = SequenceNumber + 1}};
+    discord_api_gateway_handler:handle_ws(ConnPid, StreamRef, Frame),
+    {noreply, State#state{sequence_number = SequenceNumber + 1}};
 handle_info(heartbeat, State=#state{conn_pid = ConnPid, stream_ref = StreamRef, heartbeat_interval = HeartbeatInterval}) ->
     % Send a heartbeat message back to discord
-    lager:debug("Sending heartbeat"),
+    % lager:debug("Sending heartbeat"),
     gun:ws_send(ConnPid, StreamRef, {text, jsx:encode(#{ <<"op">> => 1, <<"d">> => null })}),
     % wait here for the ACK?
     % In the future this will be a separate process monitored by the sup
     receive
-        {gun_ws, ConnPid, StreamRef, {text, ?HEARTBEAT_ACK}} -> lager:debug("ACK")
+        {gun_ws, ConnPid, StreamRef, {text, ?HEARTBEAT_ACK}} ->
+            % lager:debug("ACK"),
+            ok
     after 5000 ->
         error(heartbeat_ack_timeout)
     end,
@@ -135,7 +137,7 @@ establish_discord_connection(ConnPid, StreamRef, Data, State) ->
     HeartbeatInterval = maps:get(<<"heartbeat_interval">>, maps:get(<<"d">>, DecodedData)),
     lager:debug("Starting heartbeat with an interval of ~pms", [HeartbeatInterval]),
     % Initiate the heartbeat
-    % erlang:send_after(HeartbeatInterval, self(), heartbeat),
+    erlang:send_after(HeartbeatInterval, self(), heartbeat),
     % Send the identify with intents message
     gun:ws_send(ConnPid, StreamRef, {text, jsx:encode(generate_intents_message())}),
     lager:debug("USING IDENTIFY MSG: ~p", [generate_intents_message()]),
@@ -144,7 +146,11 @@ establish_discord_connection(ConnPid, StreamRef, Data, State) ->
         {gun_ws, ConnPid, StreamRef, {text, Ready}} ->
             {ResumeGatewayUrl, SessionId} = get_data_from_ready_message(jsx:decode(Ready))
     end,
-    status_handler:update_status(#status{activities = [#{<<"name">> => <<"hello world">>, <<"type">> => 0}], status = <<"dnd">>}),
+    status_handler:update_status(#status{activities = [#{
+        <<"name">> => <<"name">>,
+        <<"state">> => <<"Lonely bot...">>,
+        <<"type">> => 4
+    }], status = <<"idle">>}),
     State#state{
         heartbeat_interval = HeartbeatInterval,
         handshake_status = connected,
