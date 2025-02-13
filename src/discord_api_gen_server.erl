@@ -12,17 +12,6 @@
 -export([terminate/2]).
 -export([code_change/3]).
 
--record(state, {
-    conn_pid,
-    stream_ref,
-    heartbeat_interval,
-    handshake_status = not_connected,
-    resume_gateway_url = "gateway.discord.gg",
-    session_id,
-    sequence_number = 0,
-    reconnect = false
-}).
-
 %% Macros
 
 -define(GATEWAY_URL, "gateway.discord.gg").
@@ -49,9 +38,14 @@ init([]) ->
 handle_call(_Request, _From, State) ->
     {reply, ignored, State}.
 
+handle_cast({send, BinaryPayload}, State=#state{conn_pid = ConnPid, stream_ref = StreamRef}) when is_binary(BinaryPayload) ->
+    lager:debug("Sending binary payload ~p to the discord api", [BinaryPayload]),
+    gun:ws_send(ConnPid, StreamRef, {binary, BinaryPayload}),
+    {noreply, State};
 handle_cast({send, Payload}, State=#state{conn_pid = ConnPid, stream_ref = StreamRef}) ->
     lager:debug("Sending payload ~p to the discord api", [Payload]),
-    gun:ws_send(ConnPid, StreamRef, {text, Payload}),
+    BinaryPayload = term_to_binary(Payload),
+    gun:ws_send(ConnPid, StreamRef, {binary, BinaryPayload}),
     {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -67,13 +61,26 @@ handle_info(setup_connection, State) ->
     % Await the successfull connection
     {ok, http} = gun:await_up(ConnPid),
     % Upgrade to a websocket
-    gun:ws_upgrade(ConnPid, "/v=10&encoding=json"),
+    gun:ws_upgrade(ConnPid, "/?v=10&encoding=etf"),
     {noreply, State};
+handle_info(reconnect, State = #state{resume_gateway_url = ResumeGatewayUrl}) ->
+    % Open the connection to the resume url gateway
+    {ok, ConnPid} = gun:open(ResumeGatewayUrl, 443,
+                            #{protocols => [http],
+                              retry => 0,
+                              transport => tls,
+                              tls_opts => [{verify, verify_none}, {cacerts, certifi:cacerts()}],
+                              http_opts => #{version => 'HTTP/1.1'}}),
+    % Await the successfull connection
+    {ok, http} = gun:await_up(ConnPid),
+    % Upgrade to a websocket
+    gun:ws_upgrade(ConnPid, "/?v=10&encoding=etf"),
+    {noreply, State#state{handshake_status = not_connected}};
 handle_info({gun_upgrade, ConnPid, StreamRef, [<<"websocket">>], _Headers}, State) ->
     lager:debug("Got a gun_upgrade, setting state to connected"),
     {noreply, State#state{conn_pid = ConnPid, stream_ref = StreamRef}};
 % This handles the initial message from discord when we have not completed the handshake yet
-handle_info({gun_ws, ConnPid, StreamRef, {text, Data}}, State = #state{handshake_status = not_connected}) ->
+handle_info({gun_ws, ConnPid, StreamRef, {binary, Data}}, State = #state{handshake_status = not_connected}) ->
     NewState = establish_discord_connection(ConnPid, StreamRef, Data, State),
     {noreply, NewState};
 handle_info({gun_ws, ConnPid, StreamRef, {close, CloseCode, Reason}}, State) ->
@@ -87,18 +94,7 @@ handle_info({gun_ws, ConnPid, StreamRef, Frame}, State = #state{sequence_number 
     discord_api_gateway_handler:handle_ws(ConnPid, StreamRef, Frame),
     {noreply, State#state{sequence_number = SequenceNumber + 1}};
 handle_info(heartbeat, State=#state{conn_pid = ConnPid, stream_ref = StreamRef, heartbeat_interval = HeartbeatInterval}) ->
-    % Send a heartbeat message back to discord
-    % lager:debug("Sending heartbeat"),
-    gun:ws_send(ConnPid, StreamRef, {text, jsx:encode(#{ <<"op">> => 1, <<"d">> => null })}),
-    % wait here for the ACK?
-    % In the future this will be a separate process monitored by the sup
-    receive
-        {gun_ws, ConnPid, StreamRef, {text, ?HEARTBEAT_ACK}} ->
-            % lager:debug("ACK"),
-            ok
-    after 5000 ->
-        error(heartbeat_ack_timeout)
-    end,
+    gun:ws_send(ConnPid, StreamRef, {binary, term_to_binary(#{ <<"op">> => 1, <<"d">> => null })}),
     erlang:send_after(HeartbeatInterval, self(), heartbeat),
     {noreply, State};
 % This is when we can reconnect, which is decided when we process the close code sent to us, false by default
@@ -107,8 +103,8 @@ handle_info({gun_down, ConnPid, Protocol, Reason, KilledStreams}, State = #state
     lager:debug("Attempting to reconnect to url: ~p with session ID: ~p and sequence number: ~p", [ResumeGatewayUrl, SessionId, SequenceNumber]),
     % Flush the messages from the connection Pid
     gun:flush(ConnPid),
-    % TODO: handle re-connect
-    {noreply, State};
+    self ! reconnect,
+    {noreply, State#state{reconnect = false}};
 % If we cannot re-connect then send a setup_connection message to ourselves to re-connect to the original URL
 handle_info({gun_down, ConnPid, Protocol, Reason, KilledStreams}, State) ->
     lager:debug("Got a gun_down message with protocol: ~p, reason: ~p, killed streams: ~p", [Protocol, Reason, KilledStreams]),
@@ -127,30 +123,34 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+
+%% ===================================================================
+%% Internal functions
+%% ===================================================================
 establish_discord_connection(ConnPid, StreamRef, Data, State) ->
     % Complete handshake with Discord
     % Decode the frame, which should be the initial handshake message
-    DecodedData = jsx:decode(Data),
+    DecodedData = binary_to_term(Data),
     lager:debug("Initial Handshake Data: ~p", [DecodedData]),
     % Make sure the OP is 10 and save the heartbeat interval
-    10 = maps:get(<<"op">>, DecodedData),
-    HeartbeatInterval = maps:get(<<"heartbeat_interval">>, maps:get(<<"d">>, DecodedData)),
+    10 = maps:get(op, DecodedData),
+    HeartbeatInterval = maps:get(heartbeat_interval, maps:get(d, DecodedData)),
     lager:debug("Starting heartbeat with an interval of ~pms", [HeartbeatInterval]),
     % Initiate the heartbeat
     erlang:send_after(HeartbeatInterval, self(), heartbeat),
     % Send the identify with intents message
-    gun:ws_send(ConnPid, StreamRef, {text, jsx:encode(generate_intents_message())}),
+    gun:ws_send(ConnPid, StreamRef, {binary, term_to_binary(generate_intents_message())}),
     lager:debug("USING IDENTIFY MSG: ~p", [generate_intents_message()]),
     % Wait for the READY message and the GUILD_CREATE message
     receive
-        {gun_ws, ConnPid, StreamRef, {text, Ready}} ->
-            {ResumeGatewayUrl, SessionId} = get_data_from_ready_message(jsx:decode(Ready))
+        {gun_ws, ConnPid, StreamRef, {binary, Ready}} ->
+            {ResumeGatewayUrl, SessionId} = get_data_from_ready_message(binary_to_term(Ready))
     end,
-    status_handler:update_status(#status{activities = [#{
-        <<"name">> => <<"name">>,
-        <<"state">> => <<"Lonely bot...">>,
-        <<"type">> => 4
-    }], status = <<"idle">>}),
+    % status_handler:update_status(#status{activities = [#{
+    %     <<"name">> => <<"name">>,
+    %     <<"state">> => <<"Lonely bot...">>,
+    %     <<"type">> => 4
+    % }], status = <<"idle">>}),
     State#state{
         heartbeat_interval = HeartbeatInterval,
         handshake_status = connected,
@@ -173,12 +173,13 @@ generate_intents_message() ->
         }
     }.
 
-generate_intents() -> 33281.
+generate_intents() ->
+    config:get_value(intents).
 
 get_data_from_ready_message(ReadyMessage) ->
     lager:debug("ready data: ~p", [ReadyMessage]),
-    D = maps:get(<<"d">>, ReadyMessage, #{}),
-    ResumeGatewayUrl = maps:get(<<"resume_gateway_url">>, D),
-    SessionId = maps:get(<<"session_id">>, D),
+    D = maps:get(d, ReadyMessage, #{}),
+    ResumeGatewayUrl = maps:get(resume_gateway_url, D),
+    SessionId = maps:get(session_id, D),
     lager:debug("Using resume_gateway_url: ~p and session_id: ~p", [ResumeGatewayUrl, SessionId]),
     {binary_to_list(binary:replace(ResumeGatewayUrl, <<"wss://">>, <<"">>)), binary_to_list(SessionId)}.

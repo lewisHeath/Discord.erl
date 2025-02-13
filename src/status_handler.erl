@@ -5,7 +5,7 @@
 -include("../include/macros.hrl").
 
 update_status(#status{since = Since, activities = Activities, status = Status, afk = Afk}) ->
-    Payload = jsx:encode(#{
+    Payload = #{
         <<"op">> => 3,
         <<"d">> => #{
             <<"since">> => Since,
@@ -13,6 +13,6 @@ update_status(#status{since = Since, activities = Activities, status = Status, a
             <<"status">> => Status,
             <<"afk">> => Afk
         }
-    }),
+    },
     io:format("Generated status update payload: ~p~n", [Payload]),
     gen_server:cast(discord_api_gen_server, {send, Payload}).
