@@ -31,3 +31,11 @@
 -define(INVALID_INTENTS,       4013).
 -define(DISALLOWED_INTENTS,    4014).
 -define(RECONNECT_CLOSE_CODES, [?UNKNOWN_ERROR, ?UNKNOWN_OPCODE, ?DECODE_ERROR, ?NOT_AUTHENTICATED, ?ALREADY_AUTHENTICATED, ?INVALID_SEQ, ?RATE_LIMITED, ?SESSION_TIMED_OUT]).
+
+%%% ========================================
+%&& Types as binary
+%%% ========================================
+-define(S, <<"s">>).
+-define(OP, <<"op">>).
+-define(D, <<"d">>).
+-define(T, <<"t">>).

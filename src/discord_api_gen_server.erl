@@ -16,8 +16,8 @@
 
 -define(GATEWAY_URL, "gateway.discord.gg").
 -define(BOT_TOKEN, config:get_value(bot_token)).
--define(HEARTBEAT_ACK, <<"{\"t\":null,\"s\":null,\"op\":11,\"d\":null}">>).
 
+-include("../include/discord_api_types.hrl").
 -include("../include/macros.hrl").
 
 %% API.
@@ -88,15 +88,20 @@ handle_info({gun_ws, ConnPid, StreamRef, {close, CloseCode, Reason}}, State) ->
     NewState = discord_api_gateway_handler:handle_close(ConnPid, StreamRef, CloseCode, Reason, State),
     {noreply, NewState};
 % This is the main handler for when a gateway payload is sent to the application
-handle_info({gun_ws, ConnPid, StreamRef, Frame}, State = #state{sequence_number = SequenceNumber}) ->
-    % In the future, spawn a process to handle the payload from the websocket
-    % Also in the future, this will be a module defined by the user of the Library
-    discord_api_gateway_handler:handle_ws(ConnPid, StreamRef, Frame),
-    {noreply, State#state{sequence_number = SequenceNumber + 1}};
-handle_info(heartbeat, State=#state{conn_pid = ConnPid, stream_ref = StreamRef, heartbeat_interval = HeartbeatInterval}) ->
-    gun:ws_send(ConnPid, StreamRef, {binary, term_to_binary(#{ <<"op">> => 1, <<"d">> => null })}),
-    erlang:send_after(HeartbeatInterval, self(), heartbeat),
-    {noreply, State};
+handle_info({gun_ws, _ConnPid, _StreamRef, {binary, BinaryData}}, State = #state{sequence_number = SequenceNumber}) ->
+    #{s := S, op := OP, d := D, t := T} = binary_to_term(BinaryData),
+    NewSequenceNumber =
+        case S of
+            nil ->
+                SequenceNumber;
+            Number -> %% TODO handle missing sequence numbers
+                Number
+        end,
+    discord_api_gateway_handler:handle_binary(OP, D, T),
+    {noreply, State#state{sequence_number = NewSequenceNumber}};
+handle_info({gun_ws, _ConnPid, _StreamRef, {text, TextData}}, State = #state{}) ->
+    lager:warning("Received text data: ~p", [TextData]),
+    {noreply, State#state{}};
 % This is when we can reconnect, which is decided when we process the close code sent to us, false by default
 handle_info({gun_down, ConnPid, Protocol, Reason, KilledStreams}, State = #state{reconnect = true, resume_gateway_url = ResumeGatewayUrl, sequence_number = SequenceNumber, session_id = SessionId}) ->
     lager:debug("Got a gun_down message with protocol: ~p, reason: ~p, killed streams: ~p", [Protocol, Reason, KilledStreams]),
@@ -112,6 +117,10 @@ handle_info({gun_down, ConnPid, Protocol, Reason, KilledStreams}, State) ->
     gun:flush(ConnPid),
     % Restart the gen_server
     {stop, disconnected, State};
+handle_info(heartbeat, State=#state{conn_pid = ConnPid, stream_ref = StreamRef, heartbeat_interval = HeartbeatInterval}) ->
+    gun:ws_send(ConnPid, StreamRef, {binary, term_to_binary(#{ ?OP => 1, ?D => null })}),
+    erlang:send_after(HeartbeatInterval, self(), heartbeat),
+    {noreply, State};
 handle_info(Info, State) ->
     lager:debug("Handle info: ~p", [Info]),
     lager:debug("With State: ~p", [State]),
