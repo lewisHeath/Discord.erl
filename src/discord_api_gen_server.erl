@@ -24,14 +24,14 @@
 
 -spec start_link() -> {ok, pid()}.
 start_link() ->
-    lager:debug("Starting the discord api!", []),
+    ?DEBUG("Starting the discord api!", []),
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 %% gen_server.
 
 init([]) ->
     {ok, BotToken} = application:get_env(bot_token),
-    lager:debug("Using bot token: ~p", [BotToken]),
+    ?DEBUG("Using bot token: ~p", [BotToken]),
     self() ! setup_connection,
     {ok, #state{}}.
 
@@ -39,11 +39,11 @@ handle_call(_Request, _From, State) ->
     {reply, ignored, State}.
 
 handle_cast({send, BinaryPayload}, State=#state{conn_pid = ConnPid, stream_ref = StreamRef}) when is_binary(BinaryPayload) ->
-    lager:debug("Sending binary payload ~p to the discord api", [BinaryPayload]),
+    ?DEBUG("Sending binary payload ~p to the discord api", [BinaryPayload]),
     gun:ws_send(ConnPid, StreamRef, {binary, BinaryPayload}),
     {noreply, State};
 handle_cast({send, Payload}, State=#state{conn_pid = ConnPid, stream_ref = StreamRef}) ->
-    lager:debug("Sending payload ~p to the discord api", [Payload]),
+    ?DEBUG("Sending payload ~p to the discord api", [Payload]),
     BinaryPayload = term_to_binary(Payload),
     gun:ws_send(ConnPid, StreamRef, {binary, BinaryPayload}),
     {noreply, State};
@@ -77,7 +77,7 @@ handle_info(reconnect, State = #state{resume_gateway_url = ResumeGatewayUrl}) ->
     gun:ws_upgrade(ConnPid, "/?v=10&encoding=etf"),
     {noreply, State#state{handshake_status = not_connected}};
 handle_info({gun_upgrade, ConnPid, StreamRef, [<<"websocket">>], _Headers}, State) ->
-    lager:debug("Got a gun_upgrade, setting state to connected"),
+    ?DEBUG("Got a gun_upgrade, setting state to connected"),
     {noreply, State#state{conn_pid = ConnPid, stream_ref = StreamRef}};
 % This handles the initial message from discord when we have not completed the handshake yet
 handle_info({gun_ws, ConnPid, StreamRef, {binary, Data}}, State = #state{handshake_status = not_connected}) ->
@@ -100,19 +100,19 @@ handle_info({gun_ws, _ConnPid, _StreamRef, {binary, BinaryData}}, State = #state
     discord_api_gateway_handler:handle_binary(OP, D, T),
     {noreply, State#state{sequence_number = NewSequenceNumber}};
 handle_info({gun_ws, _ConnPid, _StreamRef, {text, TextData}}, State = #state{}) ->
-    lager:warning("Received text data: ~p", [TextData]),
+    ?WARNING("Received text data: ~p", [TextData]),
     {noreply, State#state{}};
 % This is when we can reconnect, which is decided when we process the close code sent to us, false by default
 handle_info({gun_down, ConnPid, Protocol, Reason, KilledStreams}, State = #state{reconnect = true, resume_gateway_url = ResumeGatewayUrl, sequence_number = SequenceNumber, session_id = SessionId}) ->
-    lager:debug("Got a gun_down message with protocol: ~p, reason: ~p, killed streams: ~p", [Protocol, Reason, KilledStreams]),
-    lager:debug("Attempting to reconnect to url: ~p with session ID: ~p and sequence number: ~p", [ResumeGatewayUrl, SessionId, SequenceNumber]),
+    ?DEBUG("Got a gun_down message with protocol: ~p, reason: ~p, killed streams: ~p", [Protocol, Reason, KilledStreams]),
+    ?DEBUG("Attempting to reconnect to url: ~p with session ID: ~p and sequence number: ~p", [ResumeGatewayUrl, SessionId, SequenceNumber]),
     % Flush the messages from the connection Pid
     gun:flush(ConnPid),
     self ! reconnect,
     {noreply, State#state{reconnect = false}};
 % If we cannot re-connect then send a setup_connection message to ourselves to re-connect to the original URL
 handle_info({gun_down, ConnPid, Protocol, Reason, KilledStreams}, State) ->
-    lager:debug("Got a gun_down message with protocol: ~p, reason: ~p, killed streams: ~p", [Protocol, Reason, KilledStreams]),
+    ?DEBUG("Got a gun_down message with protocol: ~p, reason: ~p, killed streams: ~p", [Protocol, Reason, KilledStreams]),
     % Flush the messages from the connection Pid
     gun:flush(ConnPid),
     % Restart the gen_server
@@ -122,8 +122,8 @@ handle_info(heartbeat, State=#state{conn_pid = ConnPid, stream_ref = StreamRef, 
     erlang:send_after(HeartbeatInterval, self(), heartbeat),
     {noreply, State};
 handle_info(Info, State) ->
-    lager:debug("Handle info: ~p", [Info]),
-    lager:debug("With State: ~p", [State]),
+    ?DEBUG("Handle info: ~p", [Info]),
+    ?DEBUG("With State: ~p", [State]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->
@@ -140,17 +140,15 @@ establish_discord_connection(ConnPid, StreamRef, Data, State) ->
     % Complete handshake with Discord
     % Decode the frame, which should be the initial handshake message
     DecodedData = binary_to_term(Data),
-    lager:debug("Initial Handshake Data: ~p", [DecodedData]),
+    ?DEBUG("Initial Handshake Data: ~p", [DecodedData]),
     % Make sure the OP is 10 and save the heartbeat interval
-    10 = maps:get(op, DecodedData),
-    HeartbeatInterval = maps:get(heartbeat_interval, maps:get(d, DecodedData)),
-    lager:debug("Starting heartbeat with an interval of ~pms", [HeartbeatInterval]),
-    % Initiate the heartbeat
+    #{op := 10, d := #{heartbeat_interval := HeartbeatInterval}} = DecodedData,
+    ?DEBUG("Starting heartbeat with an interval of ~pms", [HeartbeatInterval]),
     erlang:send_after(HeartbeatInterval, self(), heartbeat),
     % Send the identify with intents message
     gun:ws_send(ConnPid, StreamRef, {binary, term_to_binary(generate_intents_message())}),
-    lager:debug("USING IDENTIFY MSG: ~p", [generate_intents_message()]),
-    % Wait for the READY message and the GUILD_CREATE message
+    ?DEBUG("USING IDENTIFY MSG: ~p", [generate_intents_message()]),
+    % Wait for the READY message and the GUILD_CREATE message(s)
     receive
         {gun_ws, ConnPid, StreamRef, {binary, Ready}} ->
             {ResumeGatewayUrl, SessionId} = get_data_from_ready_message(binary_to_term(Ready))
@@ -170,8 +168,8 @@ establish_discord_connection(ConnPid, StreamRef, Data, State) ->
 
 generate_intents_message() ->
     #{
-        <<"op">> => 2,
-        <<"d">> => #{
+        ?OP => 2,
+        ?D => #{
             <<"token">> => list_to_binary(?BOT_TOKEN),
             <<"properties">> => #{
                 <<"os">> => <<"linux">>,
@@ -186,9 +184,9 @@ generate_intents() ->
     config:get_value(intents).
 
 get_data_from_ready_message(ReadyMessage) ->
-    lager:debug("ready data: ~p", [ReadyMessage]),
+    ?DEBUG("ready data: ~p", [ReadyMessage]),
     D = maps:get(d, ReadyMessage, #{}),
     ResumeGatewayUrl = maps:get(resume_gateway_url, D),
     SessionId = maps:get(session_id, D),
-    lager:debug("Using resume_gateway_url: ~p and session_id: ~p", [ResumeGatewayUrl, SessionId]),
+    ?DEBUG("Using resume_gateway_url: ~p and session_id: ~p", [ResumeGatewayUrl, SessionId]),
     {binary_to_list(binary:replace(ResumeGatewayUrl, <<"wss://">>, <<"">>)), binary_to_list(SessionId)}.
