@@ -38,11 +38,11 @@ init([]) ->
 handle_call(_Request, _From, State) ->
     {reply, ignored, State}.
 
-handle_cast({send, BinaryPayload}, State=#state{conn_pid = ConnPid, stream_ref = StreamRef}) when is_binary(BinaryPayload) ->
+handle_cast({send, BinaryPayload}, State = #state{conn_pid = ConnPid, stream_ref = StreamRef}) when is_binary(BinaryPayload) ->
     ?DEBUG("Sending binary payload ~p to the discord api", [BinaryPayload]),
     gun:ws_send(ConnPid, StreamRef, {binary, BinaryPayload}),
     {noreply, State};
-handle_cast({send, Payload}, State=#state{conn_pid = ConnPid, stream_ref = StreamRef}) ->
+handle_cast({send, Payload}, State = #state{conn_pid = ConnPid, stream_ref = StreamRef}) ->
     ?DEBUG("Sending payload ~p to the discord api", [Payload]),
     BinaryPayload = term_to_binary(Payload),
     gun:ws_send(ConnPid, StreamRef, {binary, BinaryPayload}),
@@ -63,21 +63,15 @@ handle_info(setup_connection, State) ->
     % Upgrade to a websocket
     gun:ws_upgrade(ConnPid, "/?v=10&encoding=etf"),
     {noreply, State};
-handle_info(reconnect, State = #state{resume_gateway_url = ResumeGatewayUrl}) ->
-    % Open the connection to the resume url gateway
-    {ok, ConnPid} = gun:open(ResumeGatewayUrl, 443,
-                            #{protocols => [http],
-                              retry => 0,
-                              transport => tls,
-                              tls_opts => [{verify, verify_none}, {cacerts, certifi:cacerts()}],
-                              http_opts => #{version => 'HTTP/1.1'}}),
-    % Await the successfull connection
-    {ok, http} = gun:await_up(ConnPid),
-    % Upgrade to a websocket
-    gun:ws_upgrade(ConnPid, "/?v=10&encoding=etf"),
-    {noreply, State#state{handshake_status = not_connected}};
+handle_info(reconnect, State = #state{conn_pid = ConnPid, stream_ref = StreamRef}) ->
+    % TODO: make sure old connection is closed with an opcode that is not 1000 or 1001
+    ?DEBUG("Reconnecting to the discord api..."),
+    gun:ws_send(ConnPid, StreamRef, close),
+    NewState = reconnect(State),
+    self() ! heartbeat,
+    {noreply, NewState};
 handle_info({gun_upgrade, ConnPid, StreamRef, [<<"websocket">>], _Headers}, State) ->
-    ?DEBUG("Got a gun_upgrade, setting state to connected"),
+    ?DEBUG("Got a gun_upgrade..."),
     {noreply, State#state{conn_pid = ConnPid, stream_ref = StreamRef}};
 % This handles the initial message from discord when we have not completed the handshake yet
 handle_info({gun_ws, ConnPid, StreamRef, {binary, Data}}, State = #state{handshake_status = not_connected}) ->
@@ -116,7 +110,7 @@ handle_info({gun_down, ConnPid, Protocol, Reason, KilledStreams}, State) ->
     % Flush the messages from the connection Pid
     gun:flush(ConnPid),
     % Restart the gen_server
-    {stop, disconnected, State};
+    {noreply, State};
 handle_info(heartbeat, State=#state{conn_pid = ConnPid, stream_ref = StreamRef, heartbeat_interval = HeartbeatInterval}) ->
     gun:ws_send(ConnPid, StreamRef, {binary, term_to_binary(#{ ?OP => 1, ?D => null })}),
     erlang:send_after(HeartbeatInterval, self(), heartbeat),
@@ -166,6 +160,35 @@ establish_discord_connection(ConnPid, StreamRef, Data, State) ->
         sequence_number = 1
     }.
 
+reconnect(State = #state{resume_gateway_url = ResumeGatewayUrl, session_id = SessionID, sequence_number = SequenceNumber}) ->
+    % Open the connection to the resume url gateway
+    {ok, ConnPid} = gun:open(ResumeGatewayUrl, 443,
+                            #{protocols => [http],
+                              retry => 0,
+                              transport => tls,
+                              tls_opts => [{verify, verify_none}, {cacerts, certifi:cacerts()}],
+                              http_opts => #{version => 'HTTP/1.1'}}),
+    % Await the successfull connection
+    {ok, http} = gun:await_up(ConnPid),
+    % Upgrade to a websocket
+    gun:ws_upgrade(ConnPid, "/?v=10&encoding=etf"),
+    receive
+        {gun_upgrade, ConnPid, StreamRef, [<<"websocket">>], _Headers} ->
+            % Ready to send the resume code (6)
+            ResumeMessage =
+                #{
+                    ?OP => 6,
+                    ?D => #{
+                        <<"token">> => list_to_binary(?BOT_TOKEN),
+                        <<"session_id">> => SessionID,
+                        <<"seq">> => SequenceNumber
+                    }
+                },
+            gun:ws_send(ConnPid, StreamRef, {binary, term_to_binary(ResumeMessage)})
+    end,
+    ?DEBUG("Sent the resume message: ~p to the new ws url: ~p", [ResumeMessage, ResumeGatewayUrl]),
+    State#state{handshake_status = connected, conn_pid = ConnPid, stream_ref = StreamRef}.
+
 generate_intents_message() ->
     #{
         ?OP => 2,
@@ -189,4 +212,4 @@ get_data_from_ready_message(ReadyMessage) ->
     ResumeGatewayUrl = maps:get(resume_gateway_url, D),
     SessionId = maps:get(session_id, D),
     ?DEBUG("Using resume_gateway_url: ~p and session_id: ~p", [ResumeGatewayUrl, SessionId]),
-    {binary_to_list(binary:replace(ResumeGatewayUrl, <<"wss://">>, <<"">>)), binary_to_list(SessionId)}.
+    {binary_to_list(binary:replace(ResumeGatewayUrl, <<"wss://">>, <<"">>)), SessionId}.

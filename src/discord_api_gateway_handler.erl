@@ -28,7 +28,7 @@ handle_binary(OP, D, T) ->
     spawn(?MODULE, handle_gateway_event, [OP, D, T]).
 
 handle_gateway_event(?DISPATCH, D, T) ->
-    ?DEBUG("Handling DISPATCH"),
+    ?DEBUG("Handling DISPATCH T=~p D=~p", [T, D]),
     ok;
 handle_gateway_event(?HEARTBEAT, D, T) ->
     ?DEBUG("Handling HEARTBEAT - d=~p t=~p", [D, T]),
@@ -36,12 +36,13 @@ handle_gateway_event(?HEARTBEAT, D, T) ->
     ok;
 handle_gateway_event(?RECONNECT, D, T) ->
     ?DEBUG("Handling RECONNECT"),
+    discord_api_gen_server ! reconnect,
     ok;
 handle_gateway_event(?INVALID_SESSION, D, T) ->
     ?DEBUG("Handling INVALID_SESSION"),
     ok;
 handle_gateway_event(?HELLO, D, T) ->
-    ?DEBUG("Handling HELLO"),
+    ?DEBUG("Handling HELLO T=~p D=~p", [T, D]),
     ok;
 handle_gateway_event(?HEARTBEAT_ACK, D, T) ->
     ?DEBUG("Handling HEARTBEAT_ACK"),
