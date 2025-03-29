@@ -81,6 +81,10 @@ handle_info({gun_ws, ConnPid, StreamRef, {close, CloseCode, Reason}}, State) ->
     % Handle a disconnect from the discord gateway
     NewState = discord_api_gateway_handler:handle_close(ConnPid, StreamRef, CloseCode, Reason, State),
     {noreply, NewState};
+handle_info({gun_ws, ConnPid, StreamRef, close}, State) ->
+    ?DEBUG("Received a close code of nothing, trying to reconnect"),
+    self ! reconnect,
+    {noreply, State};
 % This is the main handler for when a gateway payload is sent to the application
 handle_info({gun_ws, _ConnPid, _StreamRef, {binary, BinaryData}}, State = #state{sequence_number = SequenceNumber}) ->
     #{s := S, op := OP, d := D, t := T} = binary_to_term(BinaryData),
@@ -106,10 +110,9 @@ handle_info({gun_down, ConnPid, Protocol, Reason, KilledStreams}, State = #state
     {noreply, State#state{reconnect = false}};
 % If we cannot re-connect then send a setup_connection message to ourselves to re-connect to the original URL
 handle_info({gun_down, ConnPid, Protocol, Reason, KilledStreams}, State) ->
-    ?DEBUG("Got a gun_down message with protocol: ~p, reason: ~p, killed streams: ~p", [Protocol, Reason, KilledStreams]),
+    ?DEBUG("Got a gun_down message with connection pid: ~p protocol: ~p, reason: ~p, killed streams: ~p", [ConnPid, Protocol, Reason, KilledStreams]),
     % Flush the messages from the connection Pid
     gun:flush(ConnPid),
-    % Restart the gen_server
     {noreply, State};
 handle_info(heartbeat, State=#state{conn_pid = ConnPid, stream_ref = StreamRef, heartbeat_interval = HeartbeatInterval}) ->
     gun:ws_send(ConnPid, StreamRef, {binary, term_to_binary(#{ ?OP => 1, ?D => null })}),
