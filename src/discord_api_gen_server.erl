@@ -83,7 +83,7 @@ handle_info({gun_ws, ConnPid, StreamRef, {close, CloseCode, Reason}}, State) ->
     {noreply, NewState};
 handle_info({gun_ws, ConnPid, StreamRef, close}, State) ->
     ?DEBUG("Received a close code of nothing, trying to reconnect"),
-    self ! reconnect,
+    self() ! reconnect,
     {noreply, State};
 % This is the main handler for when a gateway payload is sent to the application
 handle_info({gun_ws, _ConnPid, _StreamRef, {binary, BinaryData}}, State = #state{sequence_number = SequenceNumber}) ->
@@ -106,7 +106,7 @@ handle_info({gun_down, ConnPid, Protocol, Reason, KilledStreams}, State = #state
     ?DEBUG("Attempting to reconnect to url: ~p with session ID: ~p and sequence number: ~p", [ResumeGatewayUrl, SessionId, SequenceNumber]),
     % Flush the messages from the connection Pid
     gun:flush(ConnPid),
-    self ! reconnect,
+    self() ! reconnect,
     {noreply, State#state{reconnect = false}};
 % If we cannot re-connect then send a setup_connection message to ourselves to re-connect to the original URL
 handle_info({gun_down, ConnPid, Protocol, Reason, KilledStreams}, State) ->
