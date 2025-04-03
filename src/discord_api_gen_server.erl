@@ -113,6 +113,7 @@ handle_info({gun_down, ConnPid, Protocol, Reason, KilledStreams}, State) ->
     ?DEBUG("Got a gun_down message with connection pid: ~p protocol: ~p, reason: ~p, killed streams: ~p", [ConnPid, Protocol, Reason, KilledStreams]),
     % Flush the messages from the connection Pid
     gun:flush(ConnPid),
+    self() ! reconnect, % maybe
     {noreply, State};
 handle_info(heartbeat, State=#state{conn_pid = ConnPid, stream_ref = StreamRef, heartbeat_interval = HeartbeatInterval}) ->
     gun:ws_send(ConnPid, StreamRef, {binary, term_to_binary(#{ ?OP => 1, ?D => null })}),
