@@ -29,10 +29,11 @@ handle_binary(OP, D, T) ->
 
 handle_gateway_event(?DISPATCH, D, T) ->
     ?DEBUG("Handling DISPATCH T=~p D=~p", [T, D]),
+    handle_dispatch(T, D),
     ok;
 handle_gateway_event(?HEARTBEAT, D, T) ->
     ?DEBUG("Handling HEARTBEAT - d=~p t=~p", [D, T]),
-    discord_api_gen_server ! {send, #{ ?OP => 1, ?D => null }}, %% Immediately send a heartbeat message
+    gen_server:cast(discord_api_gen_server, {send, #{ ?OP => 1, ?D => null }}), %% Immediately send a heartbeat message
     ok;
 handle_gateway_event(?RECONNECT, D, T) ->
     ?DEBUG("Handling RECONNECT"),
@@ -54,3 +55,11 @@ handle_close(_ConnPid, _StreamRef, CloseCode, Reason, State0) ->
     ?DEBUG("Handling close code: ~p with reason: ~p", [CloseCode, Reason]),
     CanReconnect = lists:member(CloseCode, ?RECONNECT_CLOSE_CODES),
     State0#state{reconnect = CanReconnect}.
+
+handle_dispatch('RESUMED', _) ->
+    % Finished resuming, change the state of the gen_server back to connected
+    ?DEBUG("Finished resuming the connection, setting state back to connected..."),
+    gen_server:call(discord_api_gen_server, resumed),
+    ?DEBUG("State successfully set back to connected!");
+handle_dispatch(_, _) ->
+    ok.

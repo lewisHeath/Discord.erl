@@ -35,6 +35,8 @@ init([]) ->
     self() ! setup_connection,
     {ok, #state{}}.
 
+handle_call(resumed, _From, State) ->
+    {reply, ok, State#state{handshake_status = connected}};
 handle_call(_Request, _From, State) ->
     {reply, ignored, State}.
 
@@ -69,7 +71,7 @@ handle_info(reconnect, State = #state{conn_pid = ConnPid, stream_ref = StreamRef
     gun:ws_send(ConnPid, StreamRef, close),
     NewState = reconnect(State),
     self() ! heartbeat,
-    {noreply, NewState};
+    {noreply, NewState#state{handshake_status = resuming}};
 handle_info({gun_upgrade, ConnPid, StreamRef, [<<"websocket">>], _Headers}, State) ->
     ?DEBUG("Got a gun_upgrade..."),
     {noreply, State#state{conn_pid = ConnPid, stream_ref = StreamRef}};
@@ -81,9 +83,15 @@ handle_info({gun_ws, ConnPid, StreamRef, {close, CloseCode, Reason}}, State) ->
     % Handle a disconnect from the discord gateway
     NewState = discord_api_gateway_handler:handle_close(ConnPid, StreamRef, CloseCode, Reason, State),
     {noreply, NewState};
-handle_info({gun_ws, ConnPid, StreamRef, close}, State) ->
-    ?DEBUG("Received a close code of nothing, trying to reconnect"),
-    self() ! reconnect,
+handle_info({gun_ws, _ConnPid, _StreamRef, close}, State = #state{handshake_status = HandshakeStatus}) ->
+    ?DEBUG("Received a close code of nothing, maybe reconnecting..."),
+    case HandshakeStatus of
+        resuming ->
+            ok;
+        _Other ->
+            ?DEBUG("Reconnecting because the handshake status was not set to reconnecting..."),
+            self() ! reconnect
+    end,
     {noreply, State};
 % This is the main handler for when a gateway payload is sent to the application
 handle_info({gun_ws, _ConnPid, _StreamRef, {binary, BinaryData}}, State = #state{sequence_number = SequenceNumber}) ->
@@ -101,12 +109,17 @@ handle_info({gun_ws, _ConnPid, _StreamRef, {text, TextData}}, State = #state{}) 
     ?WARNING("Received text data: ~p", [TextData]),
     {noreply, State#state{}};
 % This is when we can reconnect, which is decided when we process the close code sent to us, false by default
-handle_info({gun_down, ConnPid, Protocol, Reason, KilledStreams}, State = #state{reconnect = true, resume_gateway_url = ResumeGatewayUrl, sequence_number = SequenceNumber, session_id = SessionId}) ->
+handle_info({gun_down, ConnPid, Protocol, Reason, KilledStreams}, State = #state{reconnect = true, resume_gateway_url = ResumeGatewayUrl, sequence_number = SequenceNumber, session_id = SessionId, handshake_status = HandshakeStatus}) ->
     ?DEBUG("Got a gun_down message with protocol: ~p, reason: ~p, killed streams: ~p", [Protocol, Reason, KilledStreams]),
-    ?DEBUG("Attempting to reconnect to url: ~p with session ID: ~p and sequence number: ~p", [ResumeGatewayUrl, SessionId, SequenceNumber]),
     % Flush the messages from the connection Pid
     gun:flush(ConnPid),
-    self() ! reconnect,
+    case HandshakeStatus of
+        resuming ->
+            ok; % If we already are reconnecting from the reconnect message, don't try again
+        _Other ->
+            ?DEBUG("Attempting to reconnect to url: ~p with/reco session ID: ~p and sequence number: ~p", [ResumeGatewayUrl, SessionId, SequenceNumber]),
+            self() ! reconnect
+    end,
     {noreply, State#state{reconnect = false}};
 % If we cannot re-connect then send a setup_connection message to ourselves to re-connect to the original URL
 handle_info({gun_down, ConnPid, Protocol, Reason, KilledStreams}, State) ->
