@@ -66,9 +66,10 @@ handle_info(setup_connection, State) ->
     gun:ws_upgrade(ConnPid, "/?v=10&encoding=etf"),
     {noreply, State};
 handle_info(reconnect, State = #state{conn_pid = ConnPid, stream_ref = StreamRef}) ->
-    % TODO: make sure old connection is closed with an opcode that is not 1000 or 1001
     ?DEBUG("Reconnecting to the discord api..."),
     gun:ws_send(ConnPid, StreamRef, close),
+    % close the connection to the discord api with the current connection pid
+    gun:close(ConnPid),
     NewState = reconnect(State),
     self() ! heartbeat,
     {noreply, NewState#state{handshake_status = resuming}};
