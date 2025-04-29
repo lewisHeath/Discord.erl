@@ -16,5 +16,6 @@
     resume_gateway_url = "gateway.discord.gg",
     session_id,
     sequence_number = 0,
-    reconnect = false
+    reconnect = false,
+    hearbeat_acc = 0
 }).

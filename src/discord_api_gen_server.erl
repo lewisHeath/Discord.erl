@@ -65,14 +65,15 @@ handle_info(setup_connection, State) ->
     % Upgrade to a websocket
     gun:ws_upgrade(ConnPid, "/?v=10&encoding=etf"),
     {noreply, State};
-handle_info(reconnect, State = #state{conn_pid = ConnPid, stream_ref = StreamRef}) ->
+handle_info(reconnect, State = #state{conn_pid = ConnPid, stream_ref = StreamRef, hearbeat_acc = HearbeatAcc}) ->
     ?DEBUG("Reconnecting to the discord api..."),
     gun:ws_send(ConnPid, StreamRef, close),
     % close the connection to the discord api with the current connection pid
     gun:close(ConnPid),
     NewState = reconnect(State),
-    self() ! heartbeat,
-    {noreply, NewState#state{handshake_status = resuming}};
+    NewHeartBeatAcc = HearbeatAcc + 1,
+    self() ! {NewHeartBeatAcc, heartbeat},
+    {noreply, NewState#state{handshake_status = resuming, hearbeat_acc = NewHeartBeatAcc}};
 handle_info({gun_upgrade, ConnPid, StreamRef, [<<"websocket">>], _Headers}, State) ->
     ?DEBUG("Got a gun_upgrade..."),
     {noreply, State#state{conn_pid = ConnPid, stream_ref = StreamRef}};
@@ -129,9 +130,9 @@ handle_info({gun_down, ConnPid, Protocol, Reason, KilledStreams}, State) ->
     gun:flush(ConnPid),
     self() ! reconnect, % maybe
     {noreply, State};
-handle_info(heartbeat, State=#state{conn_pid = ConnPid, stream_ref = StreamRef, heartbeat_interval = HeartbeatInterval}) ->
+handle_info({HearbeatAcc, heartbeat}, State=#state{conn_pid = ConnPid, stream_ref = StreamRef, heartbeat_interval = HeartbeatInterval, hearbeat_acc = HearbeatAcc}) ->
     gun:ws_send(ConnPid, StreamRef, {binary, term_to_binary(#{ ?OP => 1, ?D => null })}),
-    erlang:send_after(HeartbeatInterval, self(), heartbeat),
+    erlang:send_after(HeartbeatInterval, self(), {HearbeatAcc, heartbeat}),
     {noreply, State};
 handle_info(Info, State) ->
     ?DEBUG("Handle info: ~p", [Info]),
@@ -156,7 +157,7 @@ establish_discord_connection(ConnPid, StreamRef, Data, State) ->
     % Make sure the OP is 10 and save the heartbeat interval
     #{op := 10, d := #{heartbeat_interval := HeartbeatInterval}} = DecodedData,
     ?DEBUG("Starting heartbeat with an interval of ~pms", [HeartbeatInterval]),
-    erlang:send_after(HeartbeatInterval, self(), heartbeat),
+    erlang:send_after(HeartbeatInterval, self(), {0, heartbeat}),
     % Send the identify with intents message
     gun:ws_send(ConnPid, StreamRef, {binary, term_to_binary(generate_intents_message())}),
     ?DEBUG("USING IDENTIFY MSG: ~p", [generate_intents_message()]),
