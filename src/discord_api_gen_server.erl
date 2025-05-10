@@ -72,6 +72,12 @@ handle_info(reconnect, State = #state{conn_pid = ConnPid, stream_ref = StreamRef
     gun:close(ConnPid),
     NewState = reconnect(State),
     NewHeartBeatAcc = HearbeatAcc + 1,
+    StatusMessage = list_to_binary(io_lib:format("I have reconnected ~p times!", [NewHeartBeatAcc])),
+    status_handler:update_status(#status{activities = [#{
+        <<"name">> => <<"name">>,
+        <<"state">> => StatusMessage,
+        <<"type">> => 4
+    }], status = <<"online">>}),
     self() ! {NewHeartBeatAcc, heartbeat},
     {noreply, NewState#state{handshake_status = resuming, hearbeat_acc = NewHeartBeatAcc}};
 handle_info({gun_upgrade, ConnPid, StreamRef, [<<"websocket">>], _Headers}, State) ->
@@ -166,11 +172,12 @@ establish_discord_connection(ConnPid, StreamRef, Data, State) ->
         {gun_ws, ConnPid, StreamRef, {binary, Ready}} ->
             {ResumeGatewayUrl, SessionId} = get_data_from_ready_message(binary_to_term(Ready))
     end,
-    % status_handler:update_status(#status{activities = [#{
-    %     <<"name">> => <<"name">>,
-    %     <<"state">> => <<"Lonely bot...">>,
-    %     <<"type">> => 4
-    % }], status = <<"idle">>}),
+    StatusMessage = list_to_binary(io_lib:format("I have reconnected ~p times!", [0])),
+    status_handler:update_status(#status{activities = [#{
+        <<"name">> => <<"name">>,
+        <<"state">> => StatusMessage,
+        <<"type">> => 4
+    }], status = <<"online">>}),
     State#state{
         heartbeat_interval = HeartbeatInterval,
         handshake_status = connected,
