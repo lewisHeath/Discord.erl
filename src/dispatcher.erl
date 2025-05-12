@@ -4,7 +4,7 @@
 %% This is independent of any individual rate limit on a route.
 %% If your bot gets big enough, based on its functionality, it may be impossible to stay below 50 requests per second during normal operations.
 %% =================================================================================================================
--module(rate_limiter).
+-module(dispatcher).
 -behaviour(gen_server).
 
 %% API.
@@ -28,7 +28,7 @@
 }).
 %% Macros.
 
--include("../include/discord_api_types.hrl").
+-include("logging.hrl").
 
 %% API.
 
@@ -61,7 +61,7 @@ handle_call(_Request, _From, State) ->
     {reply, ignored, State}.
 
 handle_cast({send, BinaryPayload}, State = #state{batch = Batch}) ->
-    {noreply, State#state{batch = lists:append(Batch, [BinaryPayload])}};
+    {noreply, State#state{batch = Batch ++ [BinaryPayload]}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 

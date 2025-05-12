@@ -9,28 +9,28 @@
 %% ==========================================================
 
 -include("discord_api_types.hrl").
--include("macros.hrl").
+-include("ws.hrl").
+-include("logging.hrl").
 
 %% ==========================================================
 %% API
 %% ==========================================================
 -export([
-    % handle_close/5,
     handle_gateway_event/5
 ]).
 
 %% ==========================================================
 %% Functions
 %% ==========================================================
-handle_gateway_event(?DISPATCH, D, _S, T, State) ->
+handle_gateway_event(?DISPATCH, D, S, T, State) ->
     ?DEBUG("Handling DISPATCH T=~p D=~p", [T, D]),
-    handle_dispatch(T, D, State);
+    handle_dispatch(T, D, State#ws_conn_state{sequence_number = S});
 handle_gateway_event(?HEARTBEAT, D, _S, T, State) ->
     ?DEBUG("Handling HEARTBEAT - d=~p t=~p", [D, T]),
     State;
 handle_gateway_event(?RECONNECT, D, _S, T, State) ->
     ?DEBUG("Handling RECONNECT"),
-    State;
+    discord_ws_conn:reconnect(resume, State);
 handle_gateway_event(?INVALID_SESSION, D, _S, T, State) ->
     ?DEBUG("Handling INVALID_SESSION"),
     State;
@@ -41,7 +41,7 @@ handle_gateway_event(?HELLO, D, _S, T, State) ->
     heartbeat:send_heartbeat(HeartbeatInterval),
     Intents = intents:generate_intents_message(),
     ?DEBUG("USING IDENTIFY MSG: ~p", [Intents]),
-    rate_limiter:send(Intents),
+    dispatcher:send(Intents),
     State;
 handle_gateway_event(?HEARTBEAT_ACK, D, _S, T, State) ->
     ?DEBUG("Handling HEARTBEAT_ACK"),
@@ -50,21 +50,16 @@ handle_gateway_event(UnknownOpcode, _, _S, _, State) ->
     ?WARNING("Unknown Opcode: ~p", [UnknownOpcode]),
     State.
 
-% handle_close(_ConnPid, _StreamRef, CloseCode, Reason, State0) ->
-%     ?DEBUG("Handling close code: ~p with reason: ~p", [CloseCode, Reason]),
-%     CanReconnect = lists:member(CloseCode, ?RECONNECT_CLOSE_CODES),
-%     State0#state{reconnect = CanReconnect}.
-
 %% ==========================================================
 %% Internal Functions
 %% ==========================================================
 handle_dispatch('RESUMED', _, State) ->
     ?DEBUG("Finished resuming the connection, setting state back to connected..."),
-    State;
+    State#ws_conn_state{reconnect = undefined};
 handle_dispatch('READY', D, State) ->
     ?DEBUG("READY D=~p", [D]),
     #{resume_gateway_url := ResumeGatewayUrl, session_id := SessionId} = D,
     ?DEBUG("Using resume_gateway_url: ~p and session_id: ~p", [ResumeGatewayUrl, SessionId]),
-    State#state{resume_gateway_url = ResumeGatewayUrl, session_id = SessionId};
+    State#ws_conn_state{resume_gateway_url = ResumeGatewayUrl, session_id = SessionId};
 handle_dispatch(_, _, State) ->
     State.

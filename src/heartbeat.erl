@@ -57,8 +57,8 @@ handle_call({set_interval, Interval}, _From, State) ->
 handle_call(_Request, _From, State) ->
     {reply, ignored, State}.
 
-handle_cast(heartbeat, State = #state{interval = Interval}) ->
-    rate_limiter:send(#{?OP => ?HEARTBEAT, ?D => null}),
+handle_cast(heartbeat, State = #state{interval = Interval}) -> % Force heartbeat
+    dispatcher:send(#{?OP => ?HEARTBEAT, ?D => null}),
     N = rand:uniform(1000000), % New unique heartbeat
     erlang:send_after(Interval, self(), {heartbeat, N}),
     {noreply, State#state{n = N}};
@@ -66,7 +66,7 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info({heartbeat, N}, State = #state{n = N, interval = Interval}) ->
-    rate_limiter:send(#{?OP => ?HEARTBEAT, ?D => null}),
+    dispatcher:send(#{?OP => ?HEARTBEAT, ?D => null}),
     erlang:send_after(Interval, self(), {heartbeat, N}),
     {noreply, State};
 handle_info(_Info, State) ->
