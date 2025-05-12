@@ -45,7 +45,7 @@ start_link() ->
 %% gen_server.
 
 init([]) ->
- % Open the connection to the gateway
+    % Open the connection to the gateway
     {ok, ConnPid} = gun:open("gateway.discord.gg", 443,
                             #{protocols => [http],
                               retry => 0,

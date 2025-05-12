@@ -34,14 +34,15 @@ handle_gateway_event(?RECONNECT, D, _S, T, State) ->
 handle_gateway_event(?INVALID_SESSION, D, _S, T, State) ->
     ?DEBUG("Handling INVALID_SESSION"),
     State;
-handle_gateway_event(?HELLO, D, _S, T, State) ->
+handle_gateway_event(?HELLO, D, _S, T, State = #ws_conn_state{reconnect = Reconnect}) ->
     ?DEBUG("Handling HELLO T=~p D=~p", [T, D]),
     #{heartbeat_interval := HeartbeatInterval} = D,
     ?DEBUG("Starting heartbeat with an interval of ~pms", [HeartbeatInterval]),
     heartbeat:send_heartbeat(HeartbeatInterval),
-    Intents = intents:generate_intents_message(),
-    ?DEBUG("USING IDENTIFY MSG: ~p", [Intents]),
-    dispatcher:send(Intents),
+    case Reconnect of
+        reconnecting -> ok;
+        _            -> dispatcher:send(intents:generate_intents_message())
+    end,
     State;
 handle_gateway_event(?HEARTBEAT_ACK, D, _S, T, State) ->
     ?DEBUG("Handling HEARTBEAT_ACK"),
@@ -60,6 +61,6 @@ handle_dispatch('READY', D, State) ->
     ?DEBUG("READY D=~p", [D]),
     #{resume_gateway_url := ResumeGatewayUrl, session_id := SessionId} = D,
     ?DEBUG("Using resume_gateway_url: ~p and session_id: ~p", [ResumeGatewayUrl, SessionId]),
-    State#ws_conn_state{resume_gateway_url = ResumeGatewayUrl, session_id = SessionId};
+    State#ws_conn_state{resume_gateway_url = binary_to_list(binary:replace(ResumeGatewayUrl, <<"wss://">>, <<"">>)), session_id = SessionId};
 handle_dispatch(_, _, State) ->
     State.
