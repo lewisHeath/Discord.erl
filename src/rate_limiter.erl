@@ -19,7 +19,8 @@
 -export([code_change/3]).
 
 -export([
-    send/1
+    send/1,
+    get_spec/0
 ]).
 
 -record(state, {
@@ -36,6 +37,14 @@ send(Binary) when is_binary(Binary) ->
 send(Term) ->
     Binary = term_to_binary(Term),
     gen_server:cast(?MODULE, {send, Binary}).
+
+get_spec() -> #{
+    id => ?MODULE,
+    start => {?MODULE, start_link, []},
+    restart => permanent,
+    type => worker,
+    modules => [?MODULE]
+}.
 
 -spec start_link() -> {ok, pid()}.
 start_link() ->

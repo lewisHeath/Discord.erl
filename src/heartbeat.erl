@@ -14,7 +14,8 @@
 
 -export([
     send_heartbeat/0,
-    send_heartbeat/1
+    send_heartbeat/1,
+    get_spec/0
 ]).
 
 -record(state, {
@@ -33,6 +34,14 @@ send_heartbeat() ->
 send_heartbeat(Interval) ->
     gen_server:call(?MODULE, {set_interval, Interval}),
     send_heartbeat().
+
+get_spec() -> #{
+    id => ?MODULE,
+    start => {?MODULE, start_link, []},
+    restart => permanent,
+    type => worker,
+    modules => [?MODULE]
+}.
 
 -spec start_link() -> {ok, pid()}.
 start_link() ->

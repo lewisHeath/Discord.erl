@@ -13,7 +13,8 @@
 -export([code_change/3]).
 
 -export([
-    get_ws/0
+    get_ws/0,
+    get_spec/0
 ]).
 
 %% Macros
@@ -26,6 +27,14 @@
 
 get_ws() ->
     gen_server:call(?MODULE, get_ws, 1000).
+
+get_spec() -> #{
+    id => ?MODULE,
+    start => {?MODULE, start_link, []},
+    restart => permanent,
+    type => worker,
+    modules => [?MODULE]
+}.
 
 -spec start_link() -> {ok, pid()}.
 start_link() ->
