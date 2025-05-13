@@ -1,0 +1,10 @@
+ebin
+deps
+config/sys.config
+.erlang_mk/
+_rel
+*.d
+~/
+log/
+logs/
+.erlang_mk/*
