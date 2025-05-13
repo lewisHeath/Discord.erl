@@ -84,7 +84,7 @@ handle_info({gun_ws, ConnPid, StreamRef, close}, State = #ws_conn_state{conn_pid
     {noreply, State#ws_conn_state{reconnect = resume}};
 handle_info({gun_upgrade, ConnPid, StreamRef, [<<"websocket">>], _Headers}, State = #ws_conn_state{reconnect = resume, session_id = SessionId, sequence_number = Seq}) ->
     dispatcher:send(#{?OP => ?RESUME, ?D => #{<<"token">> => list_to_binary(?BOT_TOKEN), <<"session_id">> => SessionId, <<"seq">> => Seq}}),
-    {noreply, State#ws_conn_state{conn_pid = ConnPid, stream_ref = StreamRef, reconnect = reconnecting}};
+    {noreply, State#ws_conn_state{conn_pid = ConnPid, stream_ref = StreamRef}};
 handle_info({gun_upgrade, ConnPid, StreamRef, [<<"websocket">>], _Headers}, State) ->
     {noreply, State#ws_conn_state{conn_pid = ConnPid, stream_ref = StreamRef}};
 handle_info({gun_response, _ConnPid, _, _, Status, Headers}, State) ->

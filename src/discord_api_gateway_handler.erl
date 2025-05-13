@@ -27,6 +27,7 @@ handle_gateway_event(?DISPATCH, D, S, T, State) ->
     handle_dispatch(T, D, State#ws_conn_state{sequence_number = S});
 handle_gateway_event(?HEARTBEAT, D, _S, T, State) ->
     ?DEBUG("Handling HEARTBEAT - d=~p t=~p", [D, T]),
+    heartbeat:send_heartbeat(),
     State;
 handle_gateway_event(?RECONNECT, D, _S, T, State) ->
     ?DEBUG("Handling RECONNECT"),
@@ -39,10 +40,7 @@ handle_gateway_event(?HELLO, D, _S, T, State = #ws_conn_state{reconnect = Reconn
     #{heartbeat_interval := HeartbeatInterval} = D,
     ?DEBUG("Starting heartbeat with an interval of ~pms", [HeartbeatInterval]),
     heartbeat:send_heartbeat(HeartbeatInterval),
-    case Reconnect of
-        reconnecting -> ok;
-        _            -> dispatcher:send(intents:generate_intents_message())
-    end,
+    maybe_send_intents(Reconnect),
     State;
 handle_gateway_event(?HEARTBEAT_ACK, D, _S, T, State) ->
     ?DEBUG("Handling HEARTBEAT_ACK"),
@@ -64,3 +62,9 @@ handle_dispatch('READY', D, State) ->
     State#ws_conn_state{resume_gateway_url = binary_to_list(binary:replace(ResumeGatewayUrl, <<"wss://">>, <<"">>)), session_id = SessionId};
 handle_dispatch(_, _, State) ->
     State.
+
+maybe_send_intents(resume) ->
+    ok;
+maybe_send_intents(_) ->
+    Intents = intents:generate_intents_message(),
+    dispatcher:send(Intents).
