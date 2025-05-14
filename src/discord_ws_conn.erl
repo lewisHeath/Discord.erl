@@ -91,6 +91,9 @@ handle_info({gun_response, _ConnPid, _, _, Status, Headers}, State) ->
     {stop, {ws_upgrade_failed, Status, Headers}, State};
 handle_info({gun_error, _ConnPid, _StreamRef, Reason}, State) ->
     {stop, {ws_upgrade_failed, Reason}, State};
+handle_info({gun_down, ConnPid, ws, closed, [StreamRef]}, State0 = #ws_conn_state{conn_pid = ConnPid, stream_ref = StreamRef}) ->
+    State = reconnect(resume, State0),
+    {noreply, State};
 handle_info(Info, State) ->
     ?DEBUG("Handle info: ~p", [Info]),
     ?DEBUG("With State: ~p", [State]),

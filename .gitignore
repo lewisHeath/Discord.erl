@@ -7,4 +7,4 @@ _rel
 ~/
 log/
 logs/
-.erlang_mk/*
+.erlang_mk
