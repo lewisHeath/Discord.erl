@@ -77,8 +77,8 @@ handle_info({gun_ws, ConnPid, StreamRef, {close, CloseCode, Reason}}, State0 = #
             true -> resume;
             _    -> identify
         end,
-    State = reconnect(ReconnectMode, State0),
-    {noreply, State};
+    GenServerReturn = reconnect(ReconnectMode, State0),
+    GenServerReturn;
 handle_info({gun_ws, ConnPid, StreamRef, close}, State = #ws_conn_state{conn_pid = ConnPid, stream_ref = StreamRef}) ->
     ?DEBUG("Got empty close code"),
     {noreply, State#ws_conn_state{reconnect = resume}};
@@ -121,7 +121,7 @@ reconnect(resume, State = #ws_conn_state{resume_gateway_url = ResumeGatewayUrl, 
     {ok, http} = gun:await_up(ConnPid),
     % Upgrade to a websocket
     gun:ws_upgrade(ConnPid, "/?v=10&encoding=etf"),
-    State#ws_conn_state{conn_pid = ConnPid, reconnect = resume};
-reconnect(identify, #ws_conn_state{conn_pid = ConnPid}) ->
+    {noreply, State#ws_conn_state{conn_pid = ConnPid, reconnect = resume}};
+reconnect(identify, State = #ws_conn_state{conn_pid = ConnPid}) ->
     gun:close(ConnPid),
-    supervisor:restart_child(discord_api_sup, ?MODULE).
+    {stop, disconnected, State}.
