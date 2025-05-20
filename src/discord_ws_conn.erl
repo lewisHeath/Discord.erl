@@ -109,8 +109,10 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal Functions
 %% ==========================================================
 reconnect(resume, State = #ws_conn_state{resume_gateway_url = ResumeGatewayUrl, conn_pid = OldConnPid}) ->
+    ?DEBUG("Closing ws connection"),
     gun:close(OldConnPid),
     % Open the connection to the resume url gateway
+    ?DEBUG("Opening new connection"),
     {ok, ConnPid} = gun:open(ResumeGatewayUrl, 443,
                             #{protocols => [http],
                               retry => 0,
@@ -118,10 +120,12 @@ reconnect(resume, State = #ws_conn_state{resume_gateway_url = ResumeGatewayUrl, 
                               tls_opts => [{verify, verify_none}, {cacerts, certifi:cacerts()}],
                               http_opts => #{version => 'HTTP/1.1'}}),
     % Await the successfull connection
+    ?DEBUG("Awaiting gun up"),
     {ok, http} = gun:await_up(ConnPid),
     % Upgrade to a websocket
+    ?DEBUG("Upgrading connection to ws"),
     gun:ws_upgrade(ConnPid, "/?v=10&encoding=etf"),
-    {noreply, State#ws_conn_state{conn_pid = ConnPid, reconnect = resume}};
-reconnect(identify, State = #ws_conn_state{conn_pid = ConnPid}) ->
+    State#ws_conn_state{conn_pid = ConnPid, reconnect = resume};
+reconnect(identify, #ws_conn_state{conn_pid = ConnPid}) ->
     gun:close(ConnPid),
-    {stop, disconnected, State}.
+    gen_server:stop(?MODULE, disconnected, 5000).
