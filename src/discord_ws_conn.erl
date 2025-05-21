@@ -63,6 +63,8 @@ init([]) ->
 
 handle_call(get_ws, _From, State = #ws_conn_state{conn_pid = ConnPid, stream_ref = StreamRef}) ->
     {reply, {ConnPid, StreamRef}, State};
+handle_call(get_seq, _From, State = #ws_conn_state{sequence_number = Seq}) ->
+    {reply, Seq, State};
 handle_call(_Request, _From, State) ->
     {reply, ignored, State}.
 
@@ -134,8 +136,7 @@ reconnect(identify, #ws_conn_state{conn_pid = ConnPid}) ->
     gen_server:stop(?MODULE, disconnected, 5000).
 
 get_bot_settings() ->
-    % Find the default gateway to use from the api /gateway/bot
-    % Make a http request to https://discord.com/api/v10/gateway/bot and get the url from the json body from the "url" key
+    % Make a http request to https://discord.com/api/v10/gateway/bot and get the bot settings
     BotToken = list_to_binary(?BOT_TOKEN),
     {ok, ConnPid} = gun:open("discord.com", 443,
                             #{protocols => [http],
@@ -156,6 +157,7 @@ get_bot_settings() ->
             {error, bot_options_not_found};
         {response, nofin, _, _} ->
             {ok, Body} = gun:await_body(ConnPid, StreamRef),
+            gun:close(ConnPid),
             BotSettings = jsx:decode(Body),
             {ok, BotSettings}
     end.

@@ -58,7 +58,8 @@ handle_call(_Request, _From, State) ->
     {reply, ignored, State}.
 
 handle_cast(heartbeat, State = #state{interval = Interval}) -> % Force heartbeat
-    dispatcher:send(#{?OP => ?HEARTBEAT, ?D => null}),
+    Seq = gen_server:call(discord_ws_conn, get_seq),
+    dispatcher:send(#{?OP => ?HEARTBEAT, ?D => Seq}),
     N = rand:uniform(1000000), % New unique heartbeat
     erlang:send_after(Interval, self(), {heartbeat, N}),
     {noreply, State#state{n = N}};
@@ -66,7 +67,8 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info({heartbeat, N}, State = #state{n = N, interval = Interval}) ->
-    dispatcher:send(#{?OP => ?HEARTBEAT, ?D => null}),
+    Seq = gen_server:call(discord_ws_conn, get_seq),
+    dispatcher:send(#{?OP => ?HEARTBEAT, ?D => Seq}),
     erlang:send_after(Interval, self(), {heartbeat, N}),
     {noreply, State};
 handle_info(_Info, State) ->
