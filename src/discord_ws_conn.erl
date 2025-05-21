@@ -45,8 +45,11 @@ start_link() ->
 %% gen_server.
 
 init([]) ->
+    {ok, BotSettings} = get_bot_settings(),
+    ?DEBUG("Got bot settings: ~p", [BotSettings]),
     % Open the connection to the gateway
-    {ok, ConnPid} = gun:open("gateway.discord.gg", 443,
+    #{<<"url">> := <<"wss://", GatewayUrl/binary>>} = BotSettings,
+    {ok, ConnPid} = gun:open(binary_to_list(GatewayUrl), 443,
                             #{protocols => [http],
                               retry => 0,
                               transport => tls,
@@ -56,7 +59,7 @@ init([]) ->
     {ok, http} = gun:await_up(ConnPid),
     % Upgrade to a websocket
     gun:ws_upgrade(ConnPid, "/?v=10&encoding=etf"),
-    {ok, #ws_conn_state{}}.
+    {ok, #ws_conn_state{bot_settings = BotSettings}}.
 
 handle_call(get_ws, _From, State = #ws_conn_state{conn_pid = ConnPid, stream_ref = StreamRef}) ->
     {reply, {ConnPid, StreamRef}, State};
@@ -129,3 +132,30 @@ reconnect(resume, State = #ws_conn_state{resume_gateway_url = ResumeGatewayUrl, 
 reconnect(identify, #ws_conn_state{conn_pid = ConnPid}) ->
     gun:close(ConnPid),
     gen_server:stop(?MODULE, disconnected, 5000).
+
+get_bot_settings() ->
+    % Find the default gateway to use from the api /gateway/bot
+    % Make a http request to https://discord.com/api/v10/gateway/bot and get the url from the json body from the "url" key
+    BotToken = list_to_binary(?BOT_TOKEN),
+    {ok, ConnPid} = gun:open("discord.com", 443,
+                            #{protocols => [http],
+                              retry => 0,
+                              transport => tls,
+                              tls_opts => [{verify, verify_none}, {cacerts, certifi:cacerts()}],
+                              http_opts => #{version => 'HTTP/1.1'}}),
+
+    {ok, http} = gun:await_up(ConnPid),
+    StreamRef = gun:request(ConnPid, <<"GET">>, <<"/api/v10/gateway/bot">>,
+                                  #{<<"Authorization">> => <<"Bot ", BotToken/binary>>,
+                                    <<"User-Agent">> => <<"DiscordBot (+https://discord.com/developers/docs/topics/gateway#bot)">>,
+                                    <<"Accept">> => <<"application/json">>}, []),
+
+    case gun:await(ConnPid, StreamRef) of
+        {response, fin, _, _} ->
+            gun:close(ConnPid),
+            {error, bot_options_not_found};
+        {response, nofin, _, _} ->
+            {ok, Body} = gun:await_body(ConnPid, StreamRef),
+            BotSettings = jsx:decode(Body),
+            {ok, BotSettings}
+    end.
