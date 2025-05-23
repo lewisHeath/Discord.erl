@@ -1,4 +1,4 @@
 %% ======================================================
 %% General
 %% ======================================================
--define(BOT_TOKEN, config:get_value(bot_token)).
+-define(BOT_TOKEN, os:getenv("DISCORD_BOT_TOKEN")).
