@@ -9,57 +9,62 @@
 %% ==========================================================
 
 -include("discord_api_types.hrl").
--include("macros.hrl").
+-include("ws.hrl").
+-include("logging.hrl").
 
 %% ==========================================================
 %% API
 %% ==========================================================
 -export([
-    handle_close/5,
-    handle_gateway_event/3,
-    handle_binary/3
+    handle_gateway_event/5
 ]).
 
 %% ==========================================================
 %% Functions
 %% ==========================================================
-handle_binary(OP, D, T) ->
-    % In the future pass this to the callback module the user provides TODO
-    spawn(?MODULE, handle_gateway_event, [OP, D, T]).
-
-handle_gateway_event(?DISPATCH, D, T) ->
+handle_gateway_event(?DISPATCH, D, S, T, State) ->
     ?DEBUG("Handling DISPATCH T=~p D=~p", [T, D]),
-    handle_dispatch(T, D),
-    ok;
-handle_gateway_event(?HEARTBEAT, D, T) ->
+    handle_dispatch(T, D, State#ws_conn_state{sequence_number = S});
+handle_gateway_event(?HEARTBEAT, D, _S, T, State) ->
     ?DEBUG("Handling HEARTBEAT - d=~p t=~p", [D, T]),
-    gen_server:cast(discord_api_gen_server, {send, #{ ?OP => 1, ?D => null }}), %% Immediately send a heartbeat message
-    ok;
-handle_gateway_event(?RECONNECT, D, T) ->
+    heartbeat:send_heartbeat(),
+    State;
+handle_gateway_event(?RECONNECT, D, _S, T, State) ->
     ?DEBUG("Handling RECONNECT"),
-    discord_api_gen_server ! reconnect,
-    ok;
-handle_gateway_event(?INVALID_SESSION, D, T) ->
+    discord_ws_conn:reconnect(resume, State);
+handle_gateway_event(?INVALID_SESSION, D, _S, T, State) ->
     ?DEBUG("Handling INVALID_SESSION"),
-    ok;
-handle_gateway_event(?HELLO, D, T) ->
+    State;
+handle_gateway_event(?HELLO, D, _S, T, State = #ws_conn_state{reconnect = Reconnect}) ->
     ?DEBUG("Handling HELLO T=~p D=~p", [T, D]),
-    ok;
-handle_gateway_event(?HEARTBEAT_ACK, D, T) ->
+    #{heartbeat_interval := HeartbeatInterval} = D,
+    ?DEBUG("Starting heartbeat with an interval of ~pms", [HeartbeatInterval]),
+    heartbeat:send_heartbeat(HeartbeatInterval),
+    maybe_send_intents(Reconnect),
+    State;
+handle_gateway_event(?HEARTBEAT_ACK, D, _S, T, State) ->
     ?DEBUG("Handling HEARTBEAT_ACK"),
-    ok;
-handle_gateway_event(UnknownOpcode, _, _) ->
-    ?WARNING("Unknown Opcode: ~p", [UnknownOpcode]).
+    State;
+handle_gateway_event(UnknownOpcode, _, _S, _, State) ->
+    ?WARNING("Unknown Opcode: ~p", [UnknownOpcode]),
+    State.
 
-handle_close(_ConnPid, _StreamRef, CloseCode, Reason, State0) ->
-    ?DEBUG("Handling close code: ~p with reason: ~p", [CloseCode, Reason]),
-    CanReconnect = lists:member(CloseCode, ?RECONNECT_CLOSE_CODES),
-    State0#state{reconnect = CanReconnect}.
-
-handle_dispatch('RESUMED', _) ->
-    % Finished resuming, change the state of the gen_server back to connected
+%% ==========================================================
+%% Internal Functions
+%% ==========================================================
+handle_dispatch('RESUMED', _, State) ->
     ?DEBUG("Finished resuming the connection, setting state back to connected..."),
-    gen_server:call(discord_api_gen_server, resumed),
-    ?DEBUG("State successfully set back to connected!");
-handle_dispatch(_, _) ->
-    ok.
+    State#ws_conn_state{reconnect = undefined};
+handle_dispatch('READY', D, State) ->
+    ?DEBUG("READY D=~p", [D]),
+    #{resume_gateway_url := ResumeGatewayUrl, session_id := SessionId} = D,
+    ?DEBUG("Using resume_gateway_url: ~p and session_id: ~p", [ResumeGatewayUrl, SessionId]),
+    State#ws_conn_state{resume_gateway_url = binary_to_list(binary:replace(ResumeGatewayUrl, <<"wss://">>, <<"">>)), session_id = SessionId};
+handle_dispatch(_, _, State) ->
+    State.
+
+maybe_send_intents(resume) ->
+    ok;
+maybe_send_intents(_) ->
+    Intents = intents:generate_intents_message(),
+    dispatcher:send(Intents).
