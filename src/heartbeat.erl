@@ -19,8 +19,8 @@
 ]).
 
 -record(state, {
-    n,
-    interval
+    n = 0, % Unique heartbeat number
+    interval = 41250 % Default heartbeat interval
 }).
 
 %% Macros.
