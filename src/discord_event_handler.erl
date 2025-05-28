@@ -1,0 +1,2 @@
+-module(discord_event_handler).
+-callback handle_event(EventName :: atom(), Payload :: term()) -> ok.
