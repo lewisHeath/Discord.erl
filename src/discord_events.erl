@@ -16,18 +16,18 @@
 
 -export([
     get_spec/0,
-    register_handler/2,
-    register_module/1,
-    get_handlers/0,
-    get_modules/0
+    register_function_handler/2,
+    register_module_handler/2,
+    get_function_handlers/0,
+    get_module_handlers/0
 ]).
 
 %% macros.
 -include("logging.hrl").
 
 -record(state, {
-    handlers = #{}, % Map of event type to list of handler functions
-    modules = [] % List of modules that implement the event handling behavior
+    function_handlers = #{},
+    module_handlers = #{}
 }).
 
 %% API.
@@ -42,33 +42,31 @@ get_spec() ->
         modules => [?MODULE]
     }.
 
-%% Function handler
--spec register_handler(EventType :: term(), Fun :: fun((map()) -> any())) -> ok.
-register_handler(EventType, Fun) ->
+-spec register_function_handler(EventType :: term(), Fun :: fun((map()) -> any())) -> ok.
+register_function_handler(EventType, Fun) ->
     case erlang:is_function(Fun, 2) of
         true ->
-            gen_server:cast(?MODULE, {register_handler, EventType, Fun});
+            gen_server:cast(?MODULE, {register_function_handler, EventType, Fun});
         false ->
-            error({invalid_handler, Fun})
+            error({invalid_function_handler, Fun})
     end.
 
-%% Module handler (module must implement a behavior)
--spec register_module(Module :: module()) -> ok.
-register_module(Module) ->
-    case erlang:function_exported(Module, handle_event, 2) of
+-spec register_module_handler(EventType :: term(), Pid :: pid()) -> ok.
+register_module_handler(EventType, Pid) ->
+    case erlang:is_pid(Pid) of
         true ->
-            gen_server:cast(?MODULE, {register_module, Module});
+            gen_server:cast(?MODULE, {register_module_handler, EventType, Pid});
         false ->
-            error({invalid_module, Module})
+            error({invalid_module_handler, Pid})
     end.
 
--spec get_handlers() -> map().
-get_handlers() ->
-    gen_server:call(?MODULE, get_handlers).
+-spec get_module_handlers() -> map().
+get_module_handlers() ->
+    gen_server:call(?MODULE, get_module_handlers).
 
--spec get_modules() -> list().
-get_modules() ->
-    gen_server:call(?MODULE, get_modules).
+-spec get_function_handlers() -> map().
+get_function_handlers() ->
+    gen_server:call(?MODULE, get_function_handlers).
 
 -spec start_link() -> {ok, pid()}.
 start_link() ->
@@ -79,16 +77,16 @@ start_link() ->
 init([]) ->
     {ok, #state{}}.
 
-handle_call(get_handlers, _From, State = #state{handlers = Handlers}) ->
-    ?DEBUG("Returning registered handlers: ~p", [Handlers]),
+handle_call(get_function_handlers, _From, State = #state{function_handlers = Handlers}) ->
+    ?DEBUG("Returning registered function_handlers: ~p", [Handlers]),
     {reply, Handlers, State};
-handle_call(get_modules, _From, State = #state{modules = Modules}) ->
-    ?DEBUG("Returning registered modules: ~p", [Modules]),
-    {reply, Modules, State};
+handle_call(get_module_handlers, _From, State = #state{module_handlers = Handlers}) ->
+    ?DEBUG("Returning registered module_handlers: ~p", [Handlers]),
+    {reply, Handlers, State};
 handle_call(_Request, _From, State) ->
     {reply, ignored, State}.
 
-handle_cast({register_handler, EventType, Fun}, State = #state{handlers = Handlers}) ->
+handle_cast({register_function_handler, EventType, Fun}, State = #state{function_handlers = Handlers}) ->
     ?DEBUG("Registering handler for event type ~p", [EventType]),
     case maps:is_key(EventType, Handlers) of
         true ->
@@ -99,16 +97,19 @@ handle_cast({register_handler, EventType, Fun}, State = #state{handlers = Handle
             % Create a new entry for this event type
             NewHandlers = maps:put(EventType, [Fun], Handlers)
     end,
-    {noreply, State#state{handlers = NewHandlers}};
-handle_cast({register_module, Module}, State = #state{modules = Modules}) ->
-    ?DEBUG("Registering module ~p", [Module]),
-    case lists:member(Module, Modules) of
+    {noreply, State#state{function_handlers = NewHandlers}};
+handle_cast({register_module_handler, EventType, Module}, State = #state{module_handlers = Handlers}) ->
+    ?DEBUG("Registering module handler for event type ~p", [EventType]),
+    case maps:is_key(EventType, Handlers) of
         true ->
-            {noreply, State}; % Module already registered
+            % Append the module to the existing list for this event type
+            ExistingModules = maps:get(EventType, Handlers),
+            NewHandlers = maps:put(EventType, [Module | ExistingModules], Handlers);
         false ->
-            NewModules = [Module | Modules],
-            {noreply, State#state{modules = NewModules}}
-    end;
+            % Create a new entry for this event type
+            NewHandlers = maps:put(EventType, [Module], Handlers)
+    end,
+    {noreply, State#state{module_handlers = NewHandlers}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 

@@ -24,18 +24,18 @@
 %% ==========================================================
 handle_gateway_event(?DISPATCH, D, S, T, State) ->
     ?DEBUG("Handling DISPATCH T=~p D=~p", [T, D]),
-    case discord_events:get_handlers() of
-        #{T := Handlers} ->
-            [spawn(fun() -> Handler(T, D) end) || Handler <- Handlers];
+    case discord_events:get_function_handlers() of
+        #{T := FunctionHandlers} ->
+            [spawn(fun() -> Handler(T, D) end) || Handler <- FunctionHandlers];
         _ ->
-            ?DEBUG("No handlers found for event type ~p", [T])
+            ok
     end,
-    case discord_events:get_modules() of
-        [] ->
-            ?DEBUG("No modules registered to handle event type ~p", [T]);
-        Modules ->
-            %% call the handle_event function in each module that is registered
-            [spawn(fun() -> Module:handle_event(T, D) end) || Module <- Modules]
+    case discord_events:get_module_handlers() of
+        #{T := ModuleHandlers} ->
+            %% cast messages to the handlers
+            [gen_server:cast(Handler, {T, D}) || Handler <- ModuleHandlers];
+        _ ->
+            ok
     end,
     handle_dispatch(T, D, State#ws_conn_state{sequence_number = S});
 handle_gateway_event(?HEARTBEAT, D, _S, T, State) ->
