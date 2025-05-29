@@ -74,6 +74,12 @@ handle_dispatch('READY', D, State) ->
     ?DEBUG("Using resume_gateway_url: ~p and session_id: ~p", [ResumeGatewayUrl, SessionId]),
     State#ws_conn_state{resume_gateway_url = binary_to_list(binary:replace(ResumeGatewayUrl, <<"wss://">>, <<"">>)), session_id = SessionId};
 handle_dispatch('INTERACTION_CREATE', Interaction, State) ->
+    %% parse the interaction
+    ?DEBUG("Handling INTERACTION_CREATE with Interation: ~p", [Interaction]),
+    ParsedInteraction = discord_interaction_parser:map_to_interaction(Interaction),
+    ?NOTICE("Parsed interaction: ~p", [ParsedInteraction]),
+    %% send to the handlers which then respond
+    
     State;
 handle_dispatch(_, _, State) ->
     State.
