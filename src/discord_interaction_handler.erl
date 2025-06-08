@@ -1,0 +1,2 @@
+-module(discord_interaction_handler).
+-callback handle_interaction(Interaction :: term()) -> ok.

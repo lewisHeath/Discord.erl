@@ -11,6 +11,7 @@
 -include("discord_api_types.hrl").
 -include("ws.hrl").
 -include("logging.hrl").
+-include("discord_interaction.hrl").
 
 %% ==========================================================
 %% API
@@ -30,10 +31,10 @@ handle_gateway_event(?DISPATCH, D, S, T, State) ->
         _ ->
             ok
     end,
-    case discord_events:get_module_handlers() of
-        #{T := ModuleHandlers} ->
+    case discord_events:get_pid_handlers() of
+        #{T := PidHandlers} ->
             %% cast messages to the handlers
-            [gen_server:cast(Handler, {T, D}) || Handler <- ModuleHandlers];
+            [gen_server:cast(Handler, {T, D}) || Handler <- PidHandlers];
         _ ->
             ok
     end,
@@ -77,9 +78,8 @@ handle_dispatch('INTERACTION_CREATE', Interaction, State) ->
     %% parse the interaction
     ?DEBUG("Handling INTERACTION_CREATE with Interation: ~p", [Interaction]),
     ParsedInteraction = discord_interaction_parser:map_to_interaction(Interaction),
-    ?NOTICE("Parsed interaction: ~p", [ParsedInteraction]),
-    %% send to the handlers which then respond
-    
+    ?INFO("Parsed interaction: ~p", [ParsedInteraction]),
+    discord_interactions:handle_interaction(ParsedInteraction),
     State;
 handle_dispatch(_, _, State) ->
     State.
