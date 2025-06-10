@@ -1,4 +1,4 @@
--module(discord_interactions).
+-module(interactions_registry).
 
 -include("discord_interaction.hrl").
 -include("logging.hrl").

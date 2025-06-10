@@ -70,51 +70,16 @@ handle_dispatch('RESUMED', _, State) ->
     ?DEBUG("Finished resuming the connection, setting state back to connected..."),
     State#ws_conn_state{reconnect = undefined};
 handle_dispatch('READY', D, State) ->
-    ?DEBUG("READY D=~p", [D]),
     #{resume_gateway_url := ResumeGatewayUrl, session_id := SessionId} = D,
     ?DEBUG("Using resume_gateway_url: ~p and session_id: ~p", [ResumeGatewayUrl, SessionId]),
     State#ws_conn_state{resume_gateway_url = binary_to_list(binary:replace(ResumeGatewayUrl, <<"wss://">>, <<"">>)), session_id = SessionId};
 handle_dispatch('INTERACTION_CREATE', Interaction, State) ->
-    %% parse the interaction
-    ?DEBUG("Handling INTERACTION_CREATE with Interation: ~p", [Interaction]),
     ParsedInteraction = discord_interaction_parser:map_to_interaction(Interaction),
     ?INFO("Parsed interaction: ~p", [ParsedInteraction]),
-    discord_interactions:handle_interaction(ParsedInteraction),
+    interactions_registry:handle_interaction(ParsedInteraction),
     State;
 handle_dispatch(_, _, State) ->
     State.
 
-maybe_send_intents(resume) ->
-    ok;
-maybe_send_intents(_) ->
-    Intents = intents:generate_intents_message(),
-    dispatcher:send(Intents).
-
-
-
-%% ==========================================================
-% Token = maps:get(<<"token">>, Interaction),
-% InteractionId = integer_to_binary(maps:get(<<"id">>, Interaction)),
-% ApplicationId = maps:get(<<"application_id">>, Interaction),
-
-% InteractionRecord = discord_interaction_parser:map_to_interaction(Interaction),
-% ?NOTICE("Created interaction record: ~p", [InteractionRecord]),
-% % Respond to the interaction through the API
-% % post to https://discord.com/api/v10/InteractionId/InteractionToken/callback with type of 4 in body x-www-form-urlencoded with data key with value content: pong
-% ?DEBUG("Handling INTERACTION_CREATE with InteractionId: ~p, ApplicationId: ~p, Token: ~p", [InteractionId, ApplicationId, Token]),
-% ?DEBUG("https://discord.com/api/v10/interactions/~p/~p/callback", [InteractionId, Token]),
-% Body = jsx:encode(#{<<"type">> => 4, <<"data">> => #{<<"content">> => <<"pong">>}}),
-% URL = binary_to_list(iolist_to_binary(["https://discord.com/api/v10/interactions/", InteractionId, "/", Token, "/callback"])),
-% ?DEBUG("Posting to URL: ~p with Body: ~p", [URL, Body]),
-% case httpc:request(post, {URL, [], "application/json", Body}, [], []) of
-%     {ok, {{_, 204, _}, _, _}} ->
-%         ?DEBUG("Successfully responded to interaction with ID: ~p", [InteractionId]),
-%         State;
-%     {ok, {{_, StatusCode, _}, _, _}} ->
-%         ?WARNING("Failed to respond to interaction with ID: ~p, Status Code: ~p", [InteractionId, StatusCode]),
-%         State;
-%     {error, Reason} ->
-%         ?ERROR("Error responding to interaction with ID: ~p, Reason: ~p", [InteractionId, Reason]),
-%         State
-% end,
-%% =========================================================
+maybe_send_intents(resume) -> ok;
+maybe_send_intents(_) -> dispatcher:send(intents:generate_intents_message()).

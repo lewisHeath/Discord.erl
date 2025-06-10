@@ -6,7 +6,7 @@
 
 start(_Type, _Args) ->
 	application:ensure_all_started(inets),
-	discord_interactions:start(),
+	interactions_registry:start(),
 	discord_api_sup:start_link().
 
 stop(_State) ->
