@@ -1,4 +1,4 @@
-PROJECT = discord_api
+PROJECT = discorderl
 PROJECT_DESCRIPTION = A discord api written in Erlang
 PROJECT_VERSION = 0.1.0
 
