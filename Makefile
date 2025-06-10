@@ -8,7 +8,7 @@ dep_certifi = hex 2.13.0
 dep_lager = git https://github.com/erlang-lager/lager.git
 dep_jsx = git https://github.com/talentdeficit/jsx.git
 
-SHELL_OPTS += -args_file config/vm.args -config config/sys.config -eval 'application:ensure_all_started(discord_api)'
+SHELL_OPTS += -args_file config/vm.args -config config/sys.config -eval 'application:ensure_all_started(discorderl)'
 
 # Compile flags
 ERLC_COMPILE_OPTS= +'{parse_transform, lager_transform}'

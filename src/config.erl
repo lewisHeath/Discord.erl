@@ -5,5 +5,5 @@
 ]).
 
 get_value(Key) ->
-    {ok, Value} = application:get_env(discord_api, Key),
+    {ok, Value} = application:get_env(discorderl, Key),
     Value.
