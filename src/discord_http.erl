@@ -42,6 +42,7 @@ request(Method, Endpoint, Headers, Body) ->
     URL = build_url(Endpoint),
     JsonBody = jsx:encode(Body),
     FullHeaders = default_headers() ++ Headers,
+    ?DEBUG("Requesting ~s with method ~p and body: ~p", [URL, Method, JsonBody]),
     case httpc:request(Method, {URL, FullHeaders, "application/json", JsonBody}, [], [{body_format, binary}]) of
         {ok, {{_, 200, _}, _, RespBody}} ->
             decode_ok(RespBody);

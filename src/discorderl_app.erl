@@ -5,9 +5,9 @@
 -export([stop/1]).
 
 start(_Type, _Args) ->
-	application:ensure_all_started(inets),
-	interactions_registry:start(),
-	discord_api_sup:start_link().
+    application:ensure_all_started(inets),
+    interactions_registry:start(),
+    discord_api_sup:start_link().
 
 stop(_State) ->
-	ok.
+    ok.

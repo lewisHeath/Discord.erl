@@ -33,7 +33,7 @@ generate_intents(ListOfIntents) ->
 %% Internal Functions
 %% ======================================================
 generate_intents() ->
-    ListOfIntents = config:get_value(intents),
+    ListOfIntents = config:get_value(intents, []),
     ?DEBUG("Using intents: ~p", [ListOfIntents]),
     generate_intents(ListOfIntents).
 
