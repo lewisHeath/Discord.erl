@@ -17,4 +17,6 @@ ERLC_OPTS += $(ERLC_COMPILE_OPTS)
 TEST_ERLC_OPTS += $(ERLC_COMPILE_OPTS)
 
 REL_DEPS += relx
+
+LOCAL_DEPS += inets
 include erlang.mk
