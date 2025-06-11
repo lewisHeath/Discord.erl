@@ -63,8 +63,7 @@ request(Method, Endpoint, Headers, Body) ->
 %% Internal Functions
 %% ==========================================================
 -spec build_url(endpoint()) -> string().
-build_url(Endpoint) ->
-    ?BASE_URL ++ Endpoint.
+build_url(Endpoint) -> lists:flatten([?BASE_URL | to_iodata(Endpoint)]).
 
 -spec default_headers() -> headers().
 default_headers() ->
@@ -74,6 +73,16 @@ default_headers() ->
         {"Accept", "application/json"},
         {"Authorization", "Bot " ++ ?BOT_TOKEN}
     ].
+
+to_iodata(Endpoint) when is_list(Endpoint) ->
+    lists:map(fun
+        (E) when is_binary(E) -> E;
+        (E) when is_atom(E) -> atom_to_list(E);
+        (E) when is_integer(E) -> integer_to_list(E);
+        (E) when is_float(E) -> float_to_list(E);
+        (E) when is_tuple(E) -> tuple_to_list(E);
+        (E) when is_list(E) -> E
+    end, Endpoint).
 
 -spec decode_ok(binary()) -> result().
 decode_ok(Body) ->

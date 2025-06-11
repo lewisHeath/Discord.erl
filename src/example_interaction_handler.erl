@@ -3,19 +3,21 @@
 
 -export([handle_interaction/1]).
 
--include("discord_interaction.hrl").
--include("logging.hrl").
-
 handle_interaction(Interaction) ->
-    %% Handle the interaction here
-    #interaction{token = Token, id = Id} = Interaction,
-    Response = #{
+    %% Send the response back to Discord
+    interaction_http:create_response(Interaction, #{
         <<"type">> => 4,
         <<"data">> => #{
             <<"content">> => <<"Hello from Erlang!">>
         }
-    },
-    ?DEBUG("Handling interaction ~p with ID ~p and token ~p~n", [Interaction, Id, Token]),
-    %% Send the response back to Discord
-    Res = interaction_http:create_response(integer_to_list(Id), Token, Response),
-    ?DEBUG("Response: ~p", [Res]).
+    }),
+    timer:sleep(5000),
+    % Follow up interaction response
+    interaction_http:create_followup(Interaction, #{
+        <<"content">> => <<"This is a follow-up message!">>
+    }),
+
+    timer:sleep(5000),
+    interaction_http:create_followup(Interaction, #{
+        <<"content">> => <<"This is another follow-up message!">>
+    }).
